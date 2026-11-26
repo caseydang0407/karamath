@@ -24,10 +24,18 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          if [ -f bun.lock ]; then
+            bun install --frozen-lockfile
+          else
+            bun install
+          fi
 
       - name: Build for GitHub Pages
         run: |
@@ -39,7 +47,7 @@ jobs:
           else
             export VITE_BASE_PATH="/${REPO_NAME}/"
           fi
-          npm run build
+          bun run build
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
 
