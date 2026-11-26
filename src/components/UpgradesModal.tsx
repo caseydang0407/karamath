@@ -36,7 +36,7 @@ export const UpgradesModal: React.FC<UpgradesModalProps> = ({
               Meadow &amp; Character Upgrades
             </h2>
             <p className="text-xs font-bold text-[#92400e]">
-              Ready upgrades jump to the top! Grow Kara first to unlock Kaitlyn, build your cottage, and expand the meadow.
+              Ready upgrades jump to the top! Grow Kara first to unlock Mira, build your cottage, and expand the meadow.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -77,6 +77,14 @@ export const UpgradesModal: React.FC<UpgradesModalProps> = ({
                 zeroStageLabel = 'Current: Tiny White Cotton Ball';
               } else if (def.id === 'kaitlyn') {
                 zeroStageLabel = 'Current: Waiting for Kara (Lv 20)';
+              } else if (def.id === 'joshua') {
+                zeroStageLabel = locked
+                  ? 'Current: Waiting for Mira (Lv 20)'
+                  : 'Current: Flat Meadow Ground';
+              } else if (def.id === 'katy') {
+                zeroStageLabel = locked
+                  ? 'Current: Waiting for Kaitlyn (Lv 20)'
+                  : 'Current: Flat Meadow Ground';
               } else if (def.id === 'orchard') {
                 zeroStageLabel = 'Current: Round Brown Dirt Pad';
               }
@@ -152,7 +160,11 @@ export const UpgradesModal: React.FC<UpgradesModalProps> = ({
                       className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-[#e7d8c0] bg-[#f5efe4] py-2 text-xs font-extrabold text-[#9c8468]"
                     >
                       <Lock className="h-3.5 w-3.5" />
-                      Finish Kara Lv 20 First ({progress.upgrades.kara ?? 0}/20)
+                      {def.id === 'joshua'
+                        ? `Finish Mira Lv 20 First (${progress.upgrades.kaitlyn ?? 0}/20)`
+                        : def.id === 'katy'
+                          ? `Finish Kaitlyn Lv 20 First (${progress.upgrades.joshua ?? 0}/20)`
+                          : `Finish Kara Lv 20 First (${progress.upgrades.kara ?? 0}/20)`}
                     </div>
                   ) : (
                     <button
@@ -171,7 +183,7 @@ export const UpgradesModal: React.FC<UpgradesModalProps> = ({
                       {isMax
                         ? 'Maxed Out!'
                         : nextStageName
-                          ? `${def.id === 'orchard' || def.id === 'kara' || def.id === 'kaitlyn' ? 'Grow' : 'Build'} ${nextStageName} · ${cost} ★`
+                          ? `${def.id === 'orchard' || def.id === 'kara' || def.id === 'kaitlyn' || def.id === 'joshua' || def.id === 'katy' ? 'Grow' : 'Build'} ${nextStageName} · ${cost} ★`
                           : `Upgrade · ${cost} ★`}
                     </button>
                   )}

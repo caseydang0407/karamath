@@ -312,7 +312,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
       {/* Single flat borderless control hint line */}
       <div className="text-center text-xs font-extrabold text-[#3f2812] drop-shadow-[0_1px_0_rgba(255,255,255,0.85)]">
-        Enter/Space Start · Kara &amp; Kaitlyn · 1 ★ per Answer · S Methods · T × Table · U Upgrades · R Report
+        Enter/Space Start · Kara &amp; Mira · 1 ★ per Answer · S Methods · T × Table · U Upgrades · R Report
       </div>
     </div>
   );

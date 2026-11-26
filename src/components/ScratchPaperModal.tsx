@@ -812,104 +812,243 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
 
 /* --- Sub-visualizers for Number Line, Base-10 Blocks, and Picture Groups --- */
 
+type HopKind = 'hundred' | 'ten' | 'one' | 'group';
+
+const HOP_STYLE: Record<
+  HopKind,
+  { stroke: string; text: string; pillBg: string; pillBorder: string; peakY: number }
+> = {
+  hundred: {
+    stroke: '#7e22ce',
+    text: '#581c87',
+    pillBg: '#f3e8ff',
+    pillBorder: '#a855f7',
+    peakY: 16,
+  },
+  ten: {
+    stroke: '#2563eb',
+    text: '#1e3a8a',
+    pillBg: '#dbeafe',
+    pillBorder: '#3b82f6',
+    peakY: 36,
+  },
+  one: {
+    stroke: '#16a34a',
+    text: '#14532d',
+    pillBg: '#dcfce7',
+    pillBorder: '#22c55e',
+    peakY: 56,
+  },
+  group: {
+    stroke: '#d97706',
+    text: '#78350f',
+    pillBg: '#fef3c7',
+    pillBorder: '#f59e0b',
+    peakY: 34,
+  },
+};
+
 const NumberLineView: React.FC<{ problem: MathProblem }> = ({ problem }) => {
   const { a, b, operation } = problem;
 
-  const hops: Array<{ label: string }> = [];
+  const hops: Array<{ label: string; kind: HopKind; delta?: number }> = [];
+  let startVal = a;
   let startLabel = String(a);
   let subtitle = '';
+
+  const pushPlaceHops = (amount: number, sign: 1 | -1) => {
+    const prefix = sign === 1 ? '+' : '−';
+    const hundreds = Math.floor(amount / 100);
+    const tens = Math.floor((amount % 100) / 10);
+    const ones = amount % 10;
+
+    if (amount <= 8) {
+      for (let i = 0; i < amount; i++) {
+        hops.push({ label: `${prefix}1`, kind: 'one', delta: sign });
+      }
+      return;
+    }
+
+    const shownHundreds = Math.min(hundreds, 3);
+    for (let i = 0; i < shownHundreds; i++) {
+      hops.push({ label: `${prefix}100`, kind: 'hundred', delta: sign * 100 });
+    }
+    if (hundreds > 3) {
+      const rem = (hundreds - 3) * 100;
+      hops.push({ label: `${prefix}${rem}`, kind: 'hundred', delta: sign * rem });
+    }
+
+    const shownTens = Math.min(tens, 4);
+    for (let i = 0; i < shownTens; i++) {
+      hops.push({ label: `${prefix}10`, kind: 'ten', delta: sign * 10 });
+    }
+    if (tens > 4) {
+      const rem = (tens - 4) * 10;
+      hops.push({ label: `${prefix}${rem}`, kind: 'ten', delta: sign * rem });
+    }
+
+    if (ones > 0) {
+      if (ones <= 3 && hops.length <= 6) {
+        for (let i = 0; i < ones; i++) {
+          hops.push({ label: `${prefix}1`, kind: 'one', delta: sign });
+        }
+      } else {
+        hops.push({ label: `${prefix}${ones}`, kind: 'one', delta: sign * ones });
+      }
+    }
+  };
 
   if (operation === 'add') {
     const start = Math.max(a, b);
     const jump = Math.min(a, b);
+    startVal = start;
     startLabel = String(start);
+    pushPlaceHops(jump, 1);
     if (jump <= 8) {
-      for (let i = 0; i < jump; i++) hops.push({ label: '+1' });
-      subtitle = `Start at ${start} and hop forward ${jump} times!`;
+      subtitle = `Start at ${start} and hop forward ${jump} Ones (green)!`;
+    } else if (jump >= 100) {
+      subtitle = `Jump Hundreds (purple), then Tens (blue), then Ones (green)!`;
+    } else if (jump % 10 > 0) {
+      subtitle = `Start at ${start}, jump Tens (blue), then add Ones (green)!`;
     } else {
-      const tens = Math.floor(jump / 10);
-      const ones = jump % 10;
-      for (let i = 0; i < Math.min(tens, 5); i++) hops.push({ label: '+10' });
-      if (tens > 5) hops.push({ label: `+${(tens - 5) * 10}` });
-      if (ones > 0) {
-        hops.push({ label: `+${ones}` });
-        subtitle = `Start at ${start}, jump by tens, then add ${ones} ones!`;
-      } else {
-        subtitle = `Start at ${start} and jump forward by tens!`;
-      }
+      subtitle = `Start at ${start} and jump forward by Tens (blue)!`;
     }
   } else if (operation === 'sub') {
+    startVal = a;
     startLabel = String(a);
+    pushPlaceHops(b, -1);
     if (b <= 8) {
-      for (let i = 0; i < b; i++) hops.push({ label: '−1' });
-      subtitle = `Start at ${a} and hop backward ${b} steps!`;
+      subtitle = `Start at ${a} and hop backward ${b} Ones (green)!`;
+    } else if (b >= 100) {
+      subtitle = `Hop back Hundreds (purple), Tens (blue), then Ones (green)!`;
+    } else if (b % 10 > 0) {
+      subtitle = `Start at ${a}, hop back Tens (blue), then Ones (green)!`;
     } else {
-      const tens = Math.floor(b / 10);
-      const ones = b % 10;
-      for (let i = 0; i < Math.min(tens, 5); i++) hops.push({ label: '−10' });
-      if (tens > 5) hops.push({ label: `−${(tens - 5) * 10}` });
-      if (ones > 0) {
-        hops.push({ label: `−${ones}` });
-        subtitle = `Start at ${a}, jump back by tens, then subtract ${ones} ones!`;
-      } else {
-        subtitle = `Start at ${a} and jump back by tens!`;
-      }
+      subtitle = `Start at ${a} and hop back by Tens (blue)!`;
     }
   } else if (operation === 'mul') {
+    startVal = 0;
     startLabel = '0';
     const shown = Math.min(a, 6);
-    for (let i = 0; i < shown; i++) hops.push({ label: `+${b}` });
-    if (a > 6) hops.push({ label: `... (${a} total)` });
+    const kind: HopKind =
+      b >= 100 && b % 100 === 0
+        ? 'hundred'
+        : b >= 10 && b % 10 === 0
+          ? 'ten'
+          : b < 10
+            ? 'group'
+            : 'group';
+    for (let i = 0; i < shown; i++) hops.push({ label: `+${b}`, kind, delta: b });
+    if (a > 6) hops.push({ label: `... (${a} total)`, kind: 'group' });
     subtitle = `Skip-count from 0 by +${b}, doing ${a} equal jumps!`;
   } else {
+    startVal = 0;
     startLabel = '0';
-    hops.push({ label: `+${b}` });
+    hops.push({ label: `+${b}`, kind: 'group', delta: b });
     if (a > b) {
-      hops.push({ label: `+${b}` });
-      hops.push({ label: '... (? jumps)' });
+      hops.push({ label: `+${b}`, kind: 'group', delta: b });
+      hops.push({ label: '... (? jumps)', kind: 'group' });
     }
     subtitle = `Count how many jumps of +${b} take you from 0 to ${a}!`;
   }
 
   const isBackward = operation === 'sub';
   const count = Math.max(1, hops.length);
-  const startX = isBackward ? 350 : 50;
-  const endX = isBackward ? 50 : 350;
+  const startX = isBackward ? 352 : 48;
+  const endX = isBackward ? 48 : 352;
   const stepX = (endX - startX) / count;
 
+  const hasHundred = hops.some((h) => h.kind === 'hundred');
+  const hasTen = hops.some((h) => h.kind === 'ten');
+  const hasOne = hops.some((h) => h.kind === 'one');
+  const hasGroup = hops.some((h) => h.kind === 'group');
+
+  // Precompute intermediate tick values (never reveal final answer)
+  const intermediateTicks: Array<{ x: number; label: string; color: string }> = [];
+  if (operation !== 'div' && hops.every((h) => typeof h.delta === 'number') && hops.length <= 8) {
+    let running = startVal;
+    for (let i = 0; i < hops.length - 1; i++) {
+      running += hops[i].delta ?? 0;
+      intermediateTicks.push({
+        x: startX + (i + 1) * stepX,
+        label: String(running),
+        color: HOP_STYLE[hops[i].kind].text,
+      });
+    }
+  }
+
   return (
-    <div>
-      <div className="mb-2 text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
-        Number Line Strategy
+    <div data-testid="number-line-view">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+          Number Line Strategy
+        </span>
+        {/* Place-Value Hop Color Legend */}
+        <div data-testid="numberline-legend" className="flex flex-wrap items-center gap-1.5 text-[10px] font-extrabold">
+          {(hasHundred || problem.a >= 100 || problem.b >= 100) && (
+            <span className="rounded-md border border-[#a855f7] bg-[#f3e8ff] px-1.5 py-0.5 text-[#581c87]">
+              100s Purple
+            </span>
+          )}
+          {(hasTen || operation === 'add' || operation === 'sub') && (
+            <span className="rounded-md border border-[#3b82f6] bg-[#dbeafe] px-1.5 py-0.5 text-[#1e3a8a]">
+              10s Blue
+            </span>
+          )}
+          {(hasOne || operation === 'add' || operation === 'sub') && (
+            <span className="rounded-md border border-[#22c55e] bg-[#dcfce7] px-1.5 py-0.5 text-[#14532d]">
+              1s Green
+            </span>
+          )}
+          {hasGroup && (
+            <span className="rounded-md border border-[#f59e0b] bg-[#fef3c7] px-1.5 py-0.5 text-[#78350f]">
+              Equal Jumps
+            </span>
+          )}
+        </div>
       </div>
       <div className="rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
-        <svg viewBox="0 0 400 135" className="w-full" role="img" aria-label="Number line hops">
-          <line x1="30" y1="95" x2="370" y2="95" stroke="#334155" strokeWidth="3" strokeLinecap="round" />
-          <polygon points="370,90 380,95 370,100" fill="#334155" />
-          <polygon points="30,90 20,95 30,100" fill="#334155" />
+        <svg viewBox="0 0 400 148" className="w-full" role="img" aria-label="Color-coded place value number line hops">
+          <line x1="28" y1="106" x2="372" y2="106" stroke="#334155" strokeWidth="3" strokeLinecap="round" />
+          <polygon points="372,101 382,106 372,111" fill="#334155" />
+          <polygon points="28,101 18,106 28,111" fill="#334155" />
 
           {hops.map((hop, idx) => {
             const x1 = startX + idx * stepX;
             const x2 = startX + (idx + 1) * stepX;
             const midX = (x1 + x2) / 2;
-            const peakY = 38;
+            const st = HOP_STYLE[hop.kind];
+            // Place label slightly above the quadratic Bezier apex (which sits halfway between 103 and peakY)
+            const apexY = (103 + st.peakY) / 2;
+            const pillW = Math.max(24, hop.label.length * 7.2 + 8);
+            const pillY = Math.max(2, apexY - 19);
             return (
               <g key={idx}>
                 <path
-                  d={`M ${x1} 92 Q ${midX} ${peakY} ${x2} 92`}
+                  d={`M ${x1} 103 Q ${midX} ${st.peakY} ${x2} 103`}
                   fill="none"
-                  stroke={isBackward ? '#ea580c' : '#0284c7'}
-                  strokeWidth="2.5"
+                  stroke={st.stroke}
+                  strokeWidth="3"
                   strokeDasharray={hop.label.startsWith('...') ? '4 3' : undefined}
                 />
-                <circle cx={x1} cy="95" r="4" fill="#334155" />
+                <circle cx={x1} cy="106" r="4.2" fill={st.stroke} />
+                <rect
+                  x={midX - pillW / 2}
+                  y={pillY}
+                  width={pillW}
+                  height={16}
+                  rx={6}
+                  fill={st.pillBg}
+                  stroke={st.pillBorder}
+                  strokeWidth="1.2"
+                />
                 <text
                   x={midX}
-                  y="44"
+                  y={pillY + 11.5}
                   textAnchor="middle"
-                  fontSize="11"
+                  fontSize="10.5"
                   fontWeight="800"
-                  fill={isBackward ? '#c2410c' : '#0369a1'}
+                  fill={st.text}
                 >
                   {hop.label}
                 </text>
@@ -917,13 +1056,28 @@ const NumberLineView: React.FC<{ problem: MathProblem }> = ({ problem }) => {
             );
           })}
 
-          <circle cx={startX} cy="95" r="6" fill="#22c55e" stroke="#14532d" strokeWidth="2" />
-          <text x={startX} y="120" textAnchor="middle" fontSize="14" fontWeight="800" fill="#14532d">
+          {/* Intermediate milestone numbers */}
+          {intermediateTicks.map((tick, idx) => (
+            <text
+              key={idx}
+              x={tick.x}
+              y="125"
+              textAnchor="middle"
+              fontSize="10.5"
+              fontWeight="800"
+              fill={tick.color}
+            >
+              {tick.label}
+            </text>
+          ))}
+
+          <circle cx={startX} cy="106" r="6" fill="#22c55e" stroke="#14532d" strokeWidth="2" />
+          <text x={startX} y="136" textAnchor="middle" fontSize="14" fontWeight="800" fill="#14532d">
             {startLabel}
           </text>
 
-          <circle cx={endX} cy="95" r="6" fill="#facc15" stroke="#92400e" strokeWidth="2" />
-          <text x={endX} y="120" textAnchor="middle" fontSize="15" fontWeight="800" fill="#b45309">
+          <circle cx={endX} cy="106" r="6" fill="#facc15" stroke="#92400e" strokeWidth="2" />
+          <text x={endX} y="136" textAnchor="middle" fontSize="15" fontWeight="800" fill="#b45309">
             {operation === 'div' ? String(a) : '?'}
           </text>
         </svg>
@@ -937,23 +1091,96 @@ interface InteractiveBlock {
   id: number;
   value: 100 | 10 | 1;
   crossed: boolean;
+  group: 'a' | 'b';
+  note?: string;
 }
 
-function buildBlocksForNumber(n: number, startId: number): InteractiveBlock[] {
+function buildBlocksForNumber(
+  n: number,
+  startId: number,
+  group: 'a' | 'b'
+): InteractiveBlock[] {
   const pv = splitPlaceValues(n);
   const items: InteractiveBlock[] = [];
   let nextId = startId;
   for (let i = 0; i < Math.min(pv.h, 4); i++) {
-    items.push({ id: nextId++, value: 100, crossed: false });
+    items.push({ id: nextId++, value: 100, crossed: false, group });
   }
   for (let i = 0; i < pv.t; i++) {
-    items.push({ id: nextId++, value: 10, crossed: false });
+    items.push({ id: nextId++, value: 10, crossed: false, group });
   }
   for (let i = 0; i < pv.o; i++) {
-    items.push({ id: nextId++, value: 1, crossed: false });
+    items.push({ id: nextId++, value: 1, crossed: false, group });
   }
   return items;
 }
+
+const BlockButton: React.FC<{
+  block: InteractiveBlock;
+  onToggle: (id: number) => void;
+}> = ({ block, onToggle }) => {
+  if (block.value === 100) {
+    return (
+      <button
+        type="button"
+        onClick={() => onToggle(block.id)}
+        title="Click to cross out or restore 100 Flat"
+        className={`relative flex h-10 w-10 items-center justify-center rounded border-2 text-[10px] font-extrabold transition ${
+          block.crossed
+            ? 'border-[#fca5a5] bg-[#fee2e2] text-[#dc2626] line-through opacity-45'
+            : 'border-[#7e22ce] bg-[#e9d5ff] text-[#581c87] hover:scale-105'
+        }`}
+        style={
+          block.crossed
+            ? undefined
+            : {
+                backgroundImage:
+                  'linear-gradient(#c084fc55 1px, transparent 1px), linear-gradient(90deg, #c084fc55 1px, transparent 1px)',
+                backgroundSize: '4px 4px',
+              }
+        }
+      >
+        100
+      </button>
+    );
+  }
+  if (block.value === 10) {
+    return (
+      <button
+        type="button"
+        onClick={() => onToggle(block.id)}
+        title={block.note ? `${block.note} — click to cross out or restore` : 'Click to cross out or restore 10 Rod'}
+        className={`relative h-10 w-3.5 rounded border transition ${
+          block.crossed
+            ? 'border-[#fca5a5] bg-[#fee2e2] opacity-45'
+            : block.note
+              ? 'border-[#15803d] bg-[#86efac] ring-2 ring-[#22c55e]/50 hover:scale-105'
+              : 'border-[#1d4ed8] bg-[#93c5fd] hover:scale-105'
+        }`}
+        style={
+          block.crossed
+            ? undefined
+            : {
+                backgroundImage: 'linear-gradient(rgba(30,58,138,0.22) 1px, transparent 1px)',
+                backgroundSize: '100% 4px',
+              }
+        }
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(block.id)}
+      title="Click to cross out or restore 1 Cube"
+      className={`h-4 w-4 rounded-sm border transition ${
+        block.crossed
+          ? 'border-[#fca5a5] bg-[#fee2e2] opacity-45'
+          : 'border-[#b45309] bg-[#fde047] shadow-[inset_0_-1px_0_rgba(180,83,9,0.35)] hover:scale-110'
+      }`}
+    />
+  );
+};
 
 const BaseBlocksView: React.FC<{
   problem: MathProblem;
@@ -962,10 +1189,10 @@ const BaseBlocksView: React.FC<{
   const nextIdRef = useRef(1);
   const makeInitial = () => {
     nextIdRef.current = 1;
-    const base = buildBlocksForNumber(problem.a, 1);
+    const base = buildBlocksForNumber(problem.a, 1, 'a');
     nextIdRef.current = base.length + 1;
     if (problem.operation === 'add') {
-      const extra = buildBlocksForNumber(problem.b, nextIdRef.current);
+      const extra = buildBlocksForNumber(problem.b, nextIdRef.current, 'b');
       nextIdRef.current += extra.length;
       return [...base, ...extra];
     }
@@ -973,17 +1200,26 @@ const BaseBlocksView: React.FC<{
   };
 
   const [blocks, setBlocks] = useState<InteractiveBlock[]>(makeInitial);
+  const [targetTray, setTargetTray] = useState<'a' | 'b'>('a');
   const [checkMsg, setCheckMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setBlocks(makeInitial());
+    setTargetTray('a');
     setCheckMsg(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [problem.id]);
 
+  // Separate Set 2 display blocks for sub/mul/div so both numbers are always visibly distinct
+  const referenceSetB = useMemo(
+    () => buildBlocksForNumber(problem.b, 9000, 'b'),
+    [problem.b]
+  );
+
   const addBlock = (value: 100 | 10 | 1) => {
     setCheckMsg(null);
-    setBlocks((prev) => [...prev, { id: nextIdRef.current++, value, crossed: false }]);
+    const group: 'a' | 'b' = problem.operation === 'add' ? targetTray : 'a';
+    setBlocks((prev) => [...prev, { id: nextIdRef.current++, value, crossed: false, group }]);
   };
 
   const toggleCross = (id: number) => {
@@ -999,15 +1235,35 @@ const BaseBlocksView: React.FC<{
   const activeOnes = activeBlocks.filter((b) => b.value === 1).length;
   const activeTotal = activeBlocks.reduce((sum, b) => sum + b.value, 0);
 
+  const blocksA = blocks.filter((b) => b.group === 'a');
+  const blocksB = problem.operation === 'add' ? blocks.filter((b) => b.group === 'b') : referenceSetB;
+  const activeTotalA = blocksA.filter((b) => !b.crossed).reduce((s, b) => s + b.value, 0);
+  const activeTotalB =
+    problem.operation === 'add'
+      ? blocksB.filter((b) => !b.crossed).reduce((s, b) => s + b.value, 0)
+      : problem.b;
+  const crossedTotalA = blocksA.filter((b) => b.crossed).reduce((s, b) => s + b.value, 0);
+
   const handleBreakTenToOnes = () => {
     setCheckMsg(null);
     setBlocks((prev) => {
-      const idx = prev.findIndex((b) => !b.crossed && b.value === 10);
+      // Prefer breaking a Ten inside the selected tray first
+      let idx = prev.findIndex((b) => !b.crossed && b.value === 10 && b.group === targetTray);
+      if (idx === -1) {
+        idx = prev.findIndex((b) => !b.crossed && b.value === 10);
+      }
       if (idx === -1) return prev;
+      const targetGroup = prev[idx].group;
       const copy = [...prev];
       copy.splice(idx, 1);
       for (let i = 0; i < 10; i++) {
-        copy.push({ id: nextIdRef.current++, value: 1, crossed: false });
+        copy.push({
+          id: nextIdRef.current++,
+          value: 1,
+          crossed: false,
+          group: targetGroup,
+          note: 'Broken from 10',
+        });
       }
       return copy;
     });
@@ -1016,15 +1272,41 @@ const BaseBlocksView: React.FC<{
   const handleTradeOnesToTen = () => {
     setCheckMsg(null);
     setBlocks((prev) => {
-      const oneIds = prev.filter((b) => !b.crossed && b.value === 1).slice(0, 10).map((b) => b.id);
-      if (oneIds.length < 10) return prev;
-      const idSet = new Set(oneIds);
+      const activeOneBlocks = prev.filter((b) => !b.crossed && b.value === 1);
+      if (activeOneBlocks.length < 10) return prev;
+      const picked = activeOneBlocks.slice(0, 10);
+      const idSet = new Set(picked.map((b) => b.id));
+      const destGroup: 'a' | 'b' = problem.operation === 'add' ? 'a' : picked[0].group;
       return [
         ...prev.filter((b) => !idSet.has(b.id)),
-        { id: nextIdRef.current++, value: 10, crossed: false },
+        {
+          id: nextIdRef.current++,
+          value: 10,
+          crossed: false,
+          group: destGroup,
+          note: 'Traded 10 Ones',
+        },
       ];
     });
   };
+
+  const set1Title =
+    problem.operation === 'add'
+      ? `Set 1 · Number ${problem.a}`
+      : problem.operation === 'sub'
+        ? `Set 1 · Start With ${problem.a}`
+        : problem.operation === 'mul'
+          ? `Set 1 · Groups (${problem.a})`
+          : `Set 1 · Total (${problem.a})`;
+
+  const set2Title =
+    problem.operation === 'add'
+      ? `Set 2 · Number ${problem.b}`
+      : problem.operation === 'sub'
+        ? `Set 2 · Take Away ${problem.b}`
+        : problem.operation === 'mul'
+          ? `Set 2 · Size (${problem.b})`
+          : `Set 2 · Group Size (${problem.b})`;
 
   return (
     <div data-testid="interactive-base-blocks">
@@ -1058,116 +1340,230 @@ const BaseBlocksView: React.FC<{
         </div>
       </div>
 
-      {/* Add & Regroup Controls */}
-      <div className="mb-2 flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          data-testid="blocks-add-100"
-          onClick={() => addBlock(100)}
-          className="rounded-lg border border-[#7e22ce] bg-[#f3e8ff] px-2 py-1 text-xs font-extrabold text-[#581c87] hover:bg-[#e9d5ff]"
-        >
-          +100 Flat
-        </button>
-        <button
-          type="button"
-          data-testid="blocks-add-10"
-          onClick={() => addBlock(10)}
-          className="rounded-lg border border-[#1d4ed8] bg-[#dbeafe] px-2 py-1 text-xs font-extrabold text-[#1e3a8a] hover:bg-[#bfdbfe]"
-        >
-          +10 Rod
-        </button>
-        <button
-          type="button"
-          data-testid="blocks-add-1"
-          onClick={() => addBlock(1)}
-          className="rounded-lg border border-[#b45309] bg-[#fef9c3] px-2 py-1 text-xs font-extrabold text-[#854d0e] hover:bg-[#fef08a]"
-        >
-          +1 Cube
-        </button>
-        {activeTens >= 1 && (
+      {/* Add Blocks Row */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5 rounded-xl border border-[#e7d8c0] bg-[#fcf7ec] px-2.5 py-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-extrabold tracking-wide text-[#78532a] uppercase">
+            Add:
+          </span>
           <button
             type="button"
-            data-testid="blocks-break-ten"
-            onClick={handleBreakTenToOnes}
-            className="rounded-lg border border-[#ea580c] bg-[#ffedd5] px-2 py-1 text-xs font-extrabold text-[#9a3412] hover:bg-[#fed7aa]"
+            data-testid="blocks-add-100"
+            onClick={() => addBlock(100)}
+            className="rounded-lg border border-[#7e22ce] bg-[#f3e8ff] px-2 py-1 text-xs font-extrabold text-[#581c87] hover:bg-[#e9d5ff]"
           >
-            Break 10 → 10 Ones
+            +100 Flat
           </button>
-        )}
-        {activeOnes >= 10 && (
           <button
             type="button"
-            data-testid="blocks-trade-ones"
-            onClick={handleTradeOnesToTen}
-            className="rounded-lg border border-[#15803d] bg-[#dcfce7] px-2 py-1 text-xs font-extrabold text-[#166534] hover:bg-[#bbf7d0]"
+            data-testid="blocks-add-10"
+            onClick={() => addBlock(10)}
+            className="rounded-lg border border-[#1d4ed8] bg-[#dbeafe] px-2 py-1 text-xs font-extrabold text-[#1e3a8a] hover:bg-[#bfdbfe]"
           >
-            Trade 10 Ones → 10
+            +10 Rod
           </button>
+          <button
+            type="button"
+            data-testid="blocks-add-1"
+            onClick={() => addBlock(1)}
+            className="rounded-lg border border-[#b45309] bg-[#fef9c3] px-2 py-1 text-xs font-extrabold text-[#854d0e] hover:bg-[#fef08a]"
+          >
+            +1 Cube
+          </button>
+        </div>
+        {problem.operation === 'add' && (
+          <div className="flex items-center gap-1 text-[10px] font-extrabold">
+            <span className="text-[#78532a]">Into:</span>
+            <button
+              type="button"
+              onClick={() => setTargetTray('a')}
+              className={`rounded-md border px-1.5 py-0.5 ${
+                targetTray === 'a'
+                  ? 'border-[#0284c7] bg-[#e0f2fe] text-[#0c4a6e]'
+                  : 'border-[#d6be9b] bg-white text-[#78532a]'
+              }`}
+            >
+              Set 1
+            </button>
+            <button
+              type="button"
+              onClick={() => setTargetTray('b')}
+              className={`rounded-md border px-1.5 py-0.5 ${
+                targetTray === 'b'
+                  ? 'border-[#16a34a] bg-[#dcfce7] text-[#14532d]'
+                  : 'border-[#d6be9b] bg-white text-[#78532a]'
+              }`}
+            >
+              Set 2
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Interactive Block Tray */}
-      <div className="min-h-[120px] rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
-        <div className="mb-2 flex items-center justify-between text-xs font-extrabold text-[#3f2208]">
+      {/* Distinct Break vs Trade Action Cards */}
+      <div className="mb-2.5 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          data-testid="blocks-break-ten"
+          disabled={activeTens < 1}
+          onClick={handleBreakTenToOnes}
+          className={`flex items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 text-left transition ${
+            activeTens >= 1
+              ? 'border-[#ea580c] bg-[#fff7ed] text-[#9a3412] shadow-[0_2px_0_#ea580c] hover:bg-[#ffedd5] active:translate-y-0.5'
+              : 'cursor-not-allowed border-[#e2e8f0] bg-[#f8fafc] text-[#94a3b8] opacity-75'
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className="flex shrink-0 items-center gap-0.5 rounded-md border border-[#fdba74] bg-white px-1 py-0.5"
+          >
+            <span className="h-3.5 w-1.5 rounded-xs bg-[#3b82f6]" />
+            <span className="text-[9px] font-black text-[#ea580c]">→</span>
+            <span className="grid grid-cols-2 gap-0.5">
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+            </span>
+          </span>
+          <span className="min-w-0 leading-tight">
+            <span className="block whitespace-nowrap text-[10.5px] font-extrabold">Break 10 → 10 Ones</span>
+            <span className="block text-[9.5px] font-bold opacity-85">
+              {activeTens >= 1 ? 'Unpack 1 rod to borrow' : 'Need 1+ Ten rod'}
+            </span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="blocks-trade-ones"
+          disabled={activeOnes < 10}
+          onClick={handleTradeOnesToTen}
+          className={`flex items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 text-left transition ${
+            activeOnes >= 10
+              ? 'border-[#16a34a] bg-[#f0fdf4] text-[#166534] shadow-[0_2px_0_#16a34a] hover:bg-[#dcfce7] active:translate-y-0.5'
+              : 'cursor-not-allowed border-[#e2e8f0] bg-[#f8fafc] text-[#94a3b8] opacity-75'
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className="flex shrink-0 items-center gap-0.5 rounded-md border border-[#86efac] bg-white px-1 py-0.5"
+          >
+            <span className="grid grid-cols-2 gap-0.5">
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+              <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
+            </span>
+            <span className="text-[9px] font-black text-[#16a34a]">→</span>
+            <span className="h-3.5 w-1.5 rounded-xs bg-[#22c55e]" />
+          </span>
+          <span className="min-w-0 leading-tight">
+            <span className="block whitespace-nowrap text-[10.5px] font-extrabold">Trade 10 Ones → 10</span>
+            <span className="block text-[9.5px] font-bold opacity-85">
+              {activeOnes >= 10
+                ? 'Bundle 10 cubes to carry'
+                : `Need ${10 - activeOnes} more Ones`}
+            </span>
+          </span>
+        </button>
+      </div>
+
+      {/* Two Separated Sets of Blocks Representing Both Numbers */}
+      <div className="space-y-2 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] font-extrabold text-[#3f2208]">
           <span>Tap any block to cross out / restore</span>
-          <span data-testid="blocks-active-total" className="rounded-lg bg-[#fef3c7] px-2 py-0.5 text-[#92400e] tabular-nums">
-            Total: {activeTotal} ({activeHundreds}×100, {activeTens}×10, {activeOnes}×1)
+          <span
+            data-testid="blocks-active-total"
+            className="rounded-lg bg-[#fef3c7] px-2 py-0.5 text-[#92400e] tabular-nums"
+          >
+            Active Total: {activeTotal} ({activeHundreds}×100, {activeTens}×10, {activeOnes}×1)
           </span>
         </div>
 
-        <div className="flex flex-wrap items-end gap-2">
-          {blocks.map((b) => {
-            if (b.value === 100) {
-              return (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => toggleCross(b.id)}
-                  title="Click to cross out or restore 100 Flat"
-                  className={`flex h-10 w-10 items-center justify-center rounded border-2 text-[10px] font-extrabold transition ${
-                    b.crossed
-                      ? 'border-[#fca5a5] bg-[#fee2e2] text-[#dc2626] line-through opacity-50'
-                      : 'border-[#7e22ce] bg-[#e9d5ff] text-[#581c87] hover:scale-105'
-                  }`}
-                >
-                  100
-                </button>
-              );
-            }
-            if (b.value === 10) {
-              return (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => toggleCross(b.id)}
-                  title="Click to cross out or restore 10 Rod"
-                  className={`h-10 w-3.5 rounded border transition ${
-                    b.crossed
-                      ? 'border-[#fca5a5] bg-[#fee2e2] opacity-45'
-                      : 'border-[#1d4ed8] bg-[#93c5fd] hover:scale-105'
-                  }`}
-                />
-              );
-            }
-            return (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => toggleCross(b.id)}
-                title="Click to cross out or restore 1 Cube"
-                className={`h-4 w-4 rounded-sm border transition ${
-                  b.crossed
-                    ? 'border-[#fca5a5] bg-[#fee2e2] opacity-45'
-                    : 'border-[#b45309] bg-[#fde047] hover:scale-110'
-                }`}
-              />
-            );
-          })}
-          {blocks.length === 0 && (
-            <span className="text-xs font-bold text-[#94a3b8]">
-              Use the +100, +10, and +1 buttons above to build numbers!
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
+          {/* Set 1 Tray */}
+          <div
+            data-testid="blocks-set-1"
+            className="rounded-xl border-2 border-[#7dd3fc] bg-[#f0f9ff] p-2.5"
+          >
+            <div className="mb-1.5 flex items-center justify-between gap-1">
+              <span className="text-[11px] font-extrabold text-[#0c4a6e]">{set1Title}</span>
+              <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#0369a1] tabular-nums">
+                {activeTotalA}
+              </span>
+            </div>
+            <div className="flex min-h-[56px] flex-wrap items-end gap-1.5">
+              {blocksA.map((b) => (
+                <BlockButton key={b.id} block={b} onToggle={toggleCross} />
+              ))}
+              {blocksA.length === 0 && (
+                <span className="text-[11px] font-bold text-[#64748b]">Empty Set 1</span>
+              )}
+            </div>
+          </div>
+
+          {/* Operator Badge Between Sets */}
+          <div className="flex items-center justify-center">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#d6be9b] bg-[#fef3c7] font-display text-base font-bold text-[#78350f]">
+              {problem.symbol}
             </span>
-          )}
+          </div>
+
+          {/* Set 2 Tray */}
+          <div
+            data-testid="blocks-set-2"
+            className={`rounded-xl border-2 p-2.5 ${
+              problem.operation === 'add'
+                ? 'border-[#86efac] bg-[#f0fdf4]'
+                : 'border-[#fdba74] bg-[#fff7ed]'
+            }`}
+          >
+            <div className="mb-1.5 flex items-center justify-between gap-1">
+              <span
+                className={`text-[11px] font-extrabold ${
+                  problem.operation === 'add' ? 'text-[#14532d]' : 'text-[#9a3412]'
+                }`}
+              >
+                {set2Title}
+              </span>
+              <span
+                className={`rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums ${
+                  problem.operation === 'add' ? 'text-[#15803d]' : 'text-[#c2410c]'
+                }`}
+              >
+                {problem.operation === 'sub'
+                  ? `Crossed: ${crossedTotalA}/${problem.b}`
+                  : activeTotalB}
+              </span>
+            </div>
+            <div className="flex min-h-[56px] flex-wrap items-end gap-1.5">
+              {problem.operation === 'add' ? (
+                blocksB.length > 0 ? (
+                  blocksB.map((b) => (
+                    <BlockButton key={b.id} block={b} onToggle={toggleCross} />
+                  ))
+                ) : (
+                  <span className="text-[11px] font-bold text-[#64748b]">Empty Set 2</span>
+                )
+              ) : (
+                blocksB.map((b) => (
+                  <span
+                    key={b.id}
+                    className="pointer-events-none opacity-85"
+                    aria-hidden="true"
+                  >
+                    <BlockButton block={b} onToggle={() => {}} />
+                  </span>
+                ))
+              )}
+            </div>
+            {problem.operation === 'sub' && (
+              <p className="mt-1.5 text-[10px] font-bold text-[#9a3412]">
+                Cross out {problem.b} from Set 1 above!
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

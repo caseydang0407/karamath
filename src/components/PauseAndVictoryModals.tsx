@@ -120,7 +120,7 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
         </div>
         <h2 className="font-display text-3xl font-bold text-[#451a03]">Round Complete!</h2>
         <p className="mt-1 text-sm font-bold text-[#78532a]">
-          Kara the Bunny &amp; Kaitlyn the Chick are cheering for your awesome math skills!
+          Kara the Bunny &amp; Mira the Chick are cheering for your awesome math skills!
         </p>
 
         <div className="mt-4 grid grid-cols-3 gap-2.5">

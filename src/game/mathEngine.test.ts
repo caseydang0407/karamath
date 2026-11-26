@@ -243,7 +243,35 @@ test('Sunbeam Orchard, Sky Spinner, Firefly Pergola & Wishing Well progress acro
   assert.equal(getDailyChestBonus(0), 3);
   assert.equal(getDailyChestBonus(4), 5);
 
+  const causewayDef = UPGRADE_DEFS.find((u) => u.id === 'causeway');
+  assert.ok(causewayDef);
+  assert.equal(causewayDef.name, 'Starlight Causeway');
+  assert.equal(causewayDef.maxLevel, 20);
+  assert.equal(causewayDef.stageNames?.length, 20);
+
+  const pondDef = UPGRADE_DEFS.find((u) => u.id === 'pond');
+  assert.ok(pondDef);
+  assert.equal(pondDef.name, 'Lullaby Lagoon');
+  assert.equal(pondDef.maxLevel, 20);
+  assert.equal(pondDef.stageNames?.length, 20);
+
+  const fenceDef = UPGRADE_DEFS.find((u) => u.id === 'fence');
+  assert.ok(fenceDef);
+  assert.equal(fenceDef.name, 'Sanctuary Shield');
+  assert.equal(fenceDef.maxLevel, 20);
+  assert.equal(fenceDef.stageNames?.length, 20);
+
+  const farmDef = UPGRADE_DEFS.find((u) => u.id === 'farm');
+  assert.ok(farmDef);
+  assert.equal(farmDef.name, 'Enchanted Acre');
+  assert.equal(farmDef.maxLevel, 20);
+  assert.equal(farmDef.stageNames?.length, 20);
+
   let p = createInitialProgress();
+  assert.equal(p.upgrades.causeway, 0);
+  assert.equal(p.upgrades.pond, 0);
+  assert.equal(p.upgrades.fence, 0);
+  assert.equal(p.upgrades.farm, 0);
   p.stars = 500000;
   for (let i = 1; i <= 30; i++) {
     const res = purchaseUpgrade(p, 'cottage');
@@ -253,7 +281,7 @@ test('Sunbeam Orchard, Sky Spinner, Firefly Pergola & Wishing Well progress acro
   }
   assert.equal(purchaseUpgrade(p, 'cottage').purchased, false);
 
-  for (const id of ['orchard', 'windmill', 'lanterns', 'well'] as const) {
+  for (const id of ['orchard', 'windmill', 'lanterns', 'well', 'causeway', 'pond', 'fence', 'farm'] as const) {
     for (let i = 1; i <= 20; i++) {
       const res = purchaseUpgrade(p, id);
       assert.equal(res.purchased, true);
@@ -356,6 +384,9 @@ test('upgrade costs scale by x1.3 rounded up to a whole number and Kaitlyn unloc
   );
 
   const kaitlynDef = UPGRADE_DEFS.find((u) => u.id === 'kaitlyn')!;
+  assert.equal(kaitlynDef.name, 'Mira (Yellow Chick)');
+  const joshuaDef = UPGRADE_DEFS.find((u) => u.id === 'joshua')!;
+  assert.equal(joshuaDef.name, 'Kaitlyn (Brown Bear)');
   assert.deepEqual(
     [0, 1, 2, 3, 4].map((lvl) => getUpgradeCost(kaitlynDef, lvl)),
     [4, 6, 8, 11, 15]
@@ -370,11 +401,16 @@ test('upgrade costs scale by x1.3 rounded up to a whole number and Kaitlyn unloc
   let p = createInitialProgress();
   p.stars = 50000;
 
-  // Kaitlyn locked initially
+  // Kaitlyn, Joshua, and Katy locked initially
   assert.equal(isUpgradeLocked(p, 'kaitlyn'), true);
+  assert.equal(isUpgradeLocked(p, 'joshua'), true);
+  assert.equal(isUpgradeLocked(p, 'katy'), true);
   assert.equal(getAffordableUpgradeIds(p).includes('kaitlyn'), false);
-  const blocked = purchaseUpgrade(p, 'kaitlyn');
-  assert.equal(blocked.purchased, false);
+  assert.equal(getAffordableUpgradeIds(p).includes('joshua'), false);
+  assert.equal(getAffordableUpgradeIds(p).includes('katy'), false);
+  assert.equal(purchaseUpgrade(p, 'kaitlyn').purchased, false);
+  assert.equal(purchaseUpgrade(p, 'joshua').purchased, false);
+  assert.equal(purchaseUpgrade(p, 'katy').purchased, false);
 
   // Upgrade Kara across all 20 stages
   for (let i = 1; i <= 20; i++) {
@@ -384,16 +420,41 @@ test('upgrade costs scale by x1.3 rounded up to a whole number and Kaitlyn unloc
     assert.equal(p.upgrades.kara, i);
   }
   assert.equal(isUpgradeLocked(p, 'kaitlyn'), false);
+  assert.equal(isUpgradeLocked(p, 'joshua'), true);
+  assert.equal(isUpgradeLocked(p, 'katy'), true);
   assert.equal(getAffordableUpgradeIds(p).includes('kaitlyn'), true);
 
-  // Upgrade Kaitlyn across all 21 stages
-  for (let i = 1; i <= 21; i++) {
+  // Upgrade Kaitlyn across all 20 stages
+  for (let i = 1; i <= 20; i++) {
     const res = purchaseUpgrade(p, 'kaitlyn');
     assert.equal(res.purchased, true);
     p = res.next;
     assert.equal(p.upgrades.kaitlyn, i);
   }
   assert.equal(purchaseUpgrade(p, 'kaitlyn').purchased, false);
+  assert.equal(isUpgradeLocked(p, 'joshua'), false);
+  assert.equal(isUpgradeLocked(p, 'katy'), true);
+  assert.equal(getAffordableUpgradeIds(p).includes('joshua'), true);
+
+  // Upgrade Joshua across all 20 stages
+  for (let i = 1; i <= 20; i++) {
+    const res = purchaseUpgrade(p, 'joshua');
+    assert.equal(res.purchased, true);
+    p = res.next;
+    assert.equal(p.upgrades.joshua, i);
+  }
+  assert.equal(purchaseUpgrade(p, 'joshua').purchased, false);
+  assert.equal(isUpgradeLocked(p, 'katy'), false);
+  assert.equal(getAffordableUpgradeIds(p).includes('katy'), true);
+
+  // Upgrade Katy across all 20 stages
+  for (let i = 1; i <= 20; i++) {
+    const res = purchaseUpgrade(p, 'katy');
+    assert.equal(res.purchased, true);
+    p = res.next;
+    assert.equal(p.upgrades.katy, i);
+  }
+  assert.equal(purchaseUpgrade(p, 'katy').purchased, false);
 });
 
 test('cookie persistence helpers degrade safely in non-DOM test environment', () => {
@@ -402,12 +463,18 @@ test('cookie persistence helpers degrade safely in non-DOM test environment', ()
   assert.equal(loaded.stars, 0);
   assert.equal(loaded.upgrades.kara, 0);
   assert.equal(loaded.upgrades.kaitlyn, 0);
+  assert.equal(loaded.upgrades.joshua, 0);
+  assert.equal(loaded.upgrades.katy, 0);
 });
 
 test('sortUpgradesForDisplay puts eligible affordable upgrades at the top and maxed/locked at the bottom', () => {
   const p = createInitialProgress();
   p.upgrades.kara = 1; // Lv 1 -> next costs 3 stars
   p.upgrades.cottage = 1; // Lv 1 -> next costs 3 stars
+  p.upgrades.causeway = 1; // Lv 1 -> next costs 3 stars
+  p.upgrades.pond = 1; // Lv 1 -> next costs 3 stars
+  p.upgrades.fence = 1; // Lv 1 -> next costs 3 stars
+  p.upgrades.farm = 1; // Lv 1 -> next costs 3 stars
   p.upgrades.lanterns = 1; // Lv 1 -> next costs 3 stars
   p.upgrades.well = 20; // Maxed out
   p.upgrades.orchard = 0; // Next costs 2 stars (affordable!)
@@ -417,9 +484,8 @@ test('sortUpgradesForDisplay puts eligible affordable upgrades at the top and ma
   const sortedIds = sortUpgradesForDisplay(p).map((u) => u.id);
   // Affordable unlocked items ('orchard', 'windmill') must come before unaffordable ones
   assert.deepEqual(sortedIds.slice(0, 2), ['orchard', 'windmill']);
-  // Locked 'kaitlyn' and maxed 'well' must trail at the end
-  assert.equal(sortedIds[sortedIds.length - 1], 'well');
-  assert.equal(sortedIds[sortedIds.length - 2], 'kaitlyn');
+  // Locked 'kaitlyn', 'joshua', 'katy' and maxed 'well' must trail at the end
+  assert.deepEqual(sortedIds.slice(-4), ['kaitlyn', 'joshua', 'katy', 'well']);
 });
 
 test('visual egg/chick groups stay exact across 1-digit, 2-digit, and 3-digit problems', () => {

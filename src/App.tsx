@@ -19,6 +19,7 @@ import {
   purchaseUpgrade,
   recordAnswerResult,
   ROUND_LENGTH,
+  UPGRADE_DEFS,
 } from './game/mathEngine';
 import {
   clearProgressCookies,
@@ -168,6 +169,7 @@ export default function App() {
         return;
       }
 
+      sceneRef.current?.resetCameraViewIfFocused();
       const isCorrect = submittedValue === problem.answer;
       const elapsedMs = Date.now() - questionStartRef.current;
 
@@ -418,6 +420,11 @@ export default function App() {
     showUpgrades,
   ]);
 
+  const affordableUpgradeIds = useMemo(
+    () => getAffordableUpgradeIds(progress),
+    [progress]
+  );
+
   // Mount Three.js WebGL scene ONCE
   useEffect(() => {
     const el = canvasMountRef.current;
@@ -554,10 +561,7 @@ export default function App() {
     wrongAttempts,
   ]);
 
-  const canAffordAnyUpgrade = useMemo(
-    () => getAffordableUpgradeIds(progress).length > 0,
-    [progress]
-  );
+  const canAffordAnyUpgrade = affordableUpgradeIds.length > 0;
 
   const todayCorrect = useMemo(() => getTodaySolvedCount(progress), [progress]);
 
@@ -589,6 +593,13 @@ export default function App() {
     if (id === 'lanterns') {
       setShieldsRemaining((s) => s + 1);
     }
+    const def = UPGRADE_DEFS.find((u) => u.id === id);
+    setShowUpgrades(false);
+    setFeedbackToast({
+      id: Date.now(),
+      text: `★ ${def?.name ?? 'Upgrade'} Lv ${next.upgrades[id]}!`,
+      positive: true,
+    });
     synthAudio.playUpgrade();
     sceneRef.current?.triggerUpgradeBurst(id);
   };

@@ -31,6 +31,11 @@ import {
   type UpgradeVisualHandle,
   type VisitingCritterHandle,
 } from './models';
+import { createJoshuaBear, createKatyPig } from './companionCharacters';
+import { createEnchantedAcreGroup } from './enchantedAcre';
+import { createLilypadPondGroup } from './lilypadPond';
+import { createSanctuaryShieldGroup } from './sanctuaryShield';
+import { createStarlightCausewayGroup } from './starlightCauseway';
 import { createProceduralTextures, type ProceduralTextureSet } from './textures';
 import {
   getWeatherMoodModifiers,
@@ -135,7 +140,12 @@ export class MeadowSceneController {
   // Characters & landmarks
   private kara: CharacterHandle;
   private kaitlyn: CharacterHandle;
-  private upgradeHandles: Record<Exclude<UpgradeId, 'kara' | 'kaitlyn'>, UpgradeVisualHandle>;
+  private joshua: CharacterHandle;
+  private katy: CharacterHandle;
+  private upgradeHandles: Record<
+    Exclude<UpgradeId, 'kara' | 'kaitlyn' | 'joshua' | 'katy'>,
+    UpgradeVisualHandle
+  >;
   private clouds: THREE.Group[] = [];
   private cloudMat: THREE.MeshStandardMaterial;
 
@@ -178,6 +188,12 @@ export class MeadowSceneController {
 
   private controls: OrbitControls;
   private resettingView = false;
+  private slowResettingView = false;
+  private focusGlideActive = false;
+  private focusedOnUpgrade = false;
+  private focusHoldTimer = 0;
+  private focusTargetCamPos = new THREE.Vector3();
+  private focusTargetLook = new THREE.Vector3();
   private glideSphericalActive = false;
   private glideTargetRadius = 15.8;
   private glideTargetTheta = 0;
@@ -265,7 +281,7 @@ export class MeadowSceneController {
     this.controls.enableRotate = true;
     this.controls.rotateSpeed = 0.72;
     this.controls.zoomSpeed = 0.9;
-    this.controls.minDistance = 5.5;
+    this.controls.minDistance = 3.6;
     this.controls.maxDistance = 24;
     this.controls.minPolarAngle = 0.28;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.08;
@@ -343,6 +359,16 @@ export class MeadowSceneController {
     this.kaitlyn.group.rotation.y = -0.14;
     this.scene.add(this.kaitlyn.group);
 
+    this.joshua = createJoshuaBear(this.textures);
+    this.joshua.group.position.set(-2.65, 0, -0.35);
+    this.joshua.group.rotation.y = 0.28;
+    this.scene.add(this.joshua.group);
+
+    this.katy = createKatyPig(this.textures);
+    this.katy.group.position.set(2.75, 0, -0.35);
+    this.katy.group.rotation.y = -0.28;
+    this.scene.add(this.katy.group);
+
     // Upgradable 3D Meadow Landmarks, Progressive House, Sky Spinner Windmill, Apple Orchard & Wishing Well
     const cottage = createProgressiveHouseGroup(this.textures);
     cottage.group.position.set(-2.4, 0, -4.4);
@@ -369,12 +395,31 @@ export class MeadowSceneController {
     well.group.rotation.y = -0.22;
     this.scene.add(well.group);
 
+    const causeway = createStarlightCausewayGroup(this.textures);
+    this.scene.add(causeway.group);
+
+    const pond = createLilypadPondGroup(this.textures);
+    pond.group.position.set(-5.8, 0, 2.7);
+    this.scene.add(pond.group);
+
+    const fence = createSanctuaryShieldGroup(this.textures);
+    this.scene.add(fence.group);
+
+    const farm = createEnchantedAcreGroup(this.textures);
+    farm.group.position.set(5.8, 0, 4.4);
+    farm.group.rotation.y = -0.38;
+    this.scene.add(farm.group);
+
     this.upgradeHandles = {
       orchard,
       windmill,
       lanterns,
       well,
       cottage,
+      causeway,
+      pond,
+      fence,
+      farm,
     };
 
     // Visiting streak critter (rabbit or squirrel)
@@ -622,6 +667,10 @@ export class MeadowSceneController {
     this.upgradeHandles.well.setAmbientGlow?.(lighting.ambientGlowFactor);
     this.upgradeHandles.windmill.setAmbientGlow?.(lighting.ambientGlowFactor);
     this.upgradeHandles.orchard.setAmbientGlow?.(lighting.ambientGlowFactor);
+    this.upgradeHandles.causeway.setAmbientGlow?.(lighting.ambientGlowFactor);
+    this.upgradeHandles.pond.setAmbientGlow?.(lighting.ambientGlowFactor);
+    this.upgradeHandles.fence.setAmbientGlow?.(lighting.ambientGlowFactor);
+    this.upgradeHandles.farm.setAmbientGlow?.(lighting.ambientGlowFactor);
   }
 
   syncState(input: SceneSnapshotInput): void {
@@ -636,9 +685,13 @@ export class MeadowSceneController {
 
     this.kara.setLevel(input.upgrades.kara ?? 0);
     this.kaitlyn.setLevel(input.upgrades.kaitlyn ?? 0);
+    this.joshua.setLevel(input.upgrades.joshua ?? 0);
+    this.katy.setLevel(input.upgrades.katy ?? 0);
 
     (
-      Object.keys(this.upgradeHandles) as Array<Exclude<UpgradeId, 'kara' | 'kaitlyn'>>
+      Object.keys(this.upgradeHandles) as Array<
+        Exclude<UpgradeId, 'kara' | 'kaitlyn' | 'joshua' | 'katy'>
+      >
     ).forEach((id) => {
       this.upgradeHandles[id].setLevel(input.upgrades[id] ?? 0);
     });
@@ -646,16 +699,24 @@ export class MeadowSceneController {
 
   private handleControlsStart = (): void => {
     this.resettingView = false;
+    this.slowResettingView = false;
     this.glideSphericalActive = false;
+    this.focusGlideActive = false;
+    this.focusedOnUpgrade = false;
+    this.focusHoldTimer = 0;
   };
 
   rotateCamera(deltaAzimuthRad: number): void {
     if (this.screenState === 'title') return;
     this.resettingView = false;
+    this.slowResettingView = false;
+    this.focusGlideActive = false;
+    this.focusedOnUpgrade = false;
+    this.focusHoldTimer = 0;
     _offset.copy(this.camera.position).sub(this.controls.target);
     _spherical.setFromVector3(_offset);
     if (!this.glideSphericalActive) {
-      this.glideTargetRadius = THREE.MathUtils.clamp(_spherical.radius, 5.5, 24);
+      this.glideTargetRadius = THREE.MathUtils.clamp(_spherical.radius, 3.6, 24);
       this.glideTargetTheta = _spherical.theta;
       this.glideTargetPhi = THREE.MathUtils.clamp(_spherical.phi, 0.28, Math.PI / 2 - 0.08);
     }
@@ -666,16 +727,20 @@ export class MeadowSceneController {
   zoomCamera(scaleFactor: number): void {
     if (this.screenState === 'title') return;
     this.resettingView = false;
+    this.slowResettingView = false;
+    this.focusGlideActive = false;
+    this.focusedOnUpgrade = false;
+    this.focusHoldTimer = 0;
     _offset.copy(this.camera.position).sub(this.controls.target);
     _spherical.setFromVector3(_offset);
     if (!this.glideSphericalActive) {
-      this.glideTargetRadius = THREE.MathUtils.clamp(_spherical.radius, 5.5, 24);
+      this.glideTargetRadius = THREE.MathUtils.clamp(_spherical.radius, 3.6, 24);
       this.glideTargetTheta = _spherical.theta;
       this.glideTargetPhi = THREE.MathUtils.clamp(_spherical.phi, 0.28, Math.PI / 2 - 0.08);
     }
     this.glideTargetRadius = THREE.MathUtils.clamp(
       this.glideTargetRadius * scaleFactor,
-      5.5,
+      3.6,
       24
     );
     this.glideSphericalActive = true;
@@ -684,7 +749,82 @@ export class MeadowSceneController {
   resetCameraView(): void {
     if (this.screenState === 'title') return;
     this.glideSphericalActive = false;
+    this.focusGlideActive = false;
+    this.focusedOnUpgrade = false;
+    this.focusHoldTimer = 0;
+    this.slowResettingView = false;
     this.resettingView = true;
+  }
+
+  resetCameraViewIfFocused(): void {
+    if (this.focusedOnUpgrade || this.slowResettingView) {
+      this.resetCameraView();
+    }
+  }
+
+  focusOnUpgrade(upgradeId: UpgradeId): void {
+    if (this.screenState === 'title') return;
+    this.resettingView = false;
+    this.slowResettingView = false;
+    this.glideSphericalActive = false;
+    this.focusedOnUpgrade = true;
+    this.focusGlideActive = true;
+    this.focusHoldTimer = 0.85;
+
+    switch (upgradeId) {
+      case 'kara':
+        this.focusTargetLook.set(-0.95, 0.72, 0.35);
+        this.focusTargetCamPos.set(-1.15, 2.35, 5.45);
+        break;
+      case 'kaitlyn':
+        this.focusTargetLook.set(1.05, 0.72, 0.35);
+        this.focusTargetCamPos.set(1.25, 2.35, 5.45);
+        break;
+      case 'joshua':
+        this.focusTargetLook.set(-2.65, 0.72, -0.35);
+        this.focusTargetCamPos.set(-3.15, 2.35, 5.25);
+        break;
+      case 'katy':
+        this.focusTargetLook.set(2.75, 0.72, -0.35);
+        this.focusTargetCamPos.set(3.25, 2.35, 5.25);
+        break;
+      case 'cottage':
+        this.focusTargetLook.set(-2.4, 1.45, -4.4);
+        this.focusTargetCamPos.set(-0.8, 3.6, 2.8);
+        break;
+      case 'causeway':
+        this.focusTargetLook.set(0.05, 0.4, 2.3);
+        this.focusTargetCamPos.set(2.2, 3.4, 8.2);
+        break;
+      case 'pond':
+        this.focusTargetLook.set(-5.8, 0.4, 2.7);
+        this.focusTargetCamPos.set(-4.0, 3.6, 7.6);
+        break;
+      case 'orchard':
+        this.focusTargetLook.set(-6.0, 1.4, -1.2);
+        this.focusTargetCamPos.set(-3.6, 3.3, 4.6);
+        break;
+      case 'windmill':
+        this.focusTargetLook.set(-8.6, 2.2, -4.3);
+        this.focusTargetCamPos.set(-4.8, 4.4, 3.4);
+        break;
+      case 'well':
+        this.focusTargetLook.set(2.8, 1.15, -4.4);
+        this.focusTargetCamPos.set(3.4, 2.9, 1.2);
+        break;
+      case 'lanterns':
+        this.focusTargetLook.set(5.6, 1.2, -0.6);
+        this.focusTargetCamPos.set(3.4, 3.0, 4.6);
+        break;
+      case 'fence':
+        this.focusTargetLook.set(1.8, 0.9, 8.8);
+        this.focusTargetCamPos.set(5.2, 5.4, 18.2);
+        break;
+      case 'farm':
+        this.focusTargetLook.set(5.8, 0.75, 4.4);
+        this.focusTargetCamPos.set(3.8, 3.6, 10.6);
+        break;
+    }
   }
 
   spawnVisitingAnimal(species: VisitorSpecies): void {
@@ -727,6 +867,12 @@ export class MeadowSceneController {
     if (this.kaitlyn.group.visible) {
       this.spawnBurst(this.kaitlyn.group.position.x, 1.65, this.kaitlyn.group.position.z, 12);
     }
+    if (this.joshua.group.visible) {
+      this.spawnBurst(this.joshua.group.position.x, 1.65, this.joshua.group.position.z, 12);
+    }
+    if (this.katy.group.visible) {
+      this.spawnBurst(this.katy.group.position.x, 1.65, this.katy.group.position.z, 12);
+    }
   }
 
   triggerWrongFeedback(): void {
@@ -734,6 +880,7 @@ export class MeadowSceneController {
   }
 
   triggerUpgradeBurst(upgradeId: UpgradeId): void {
+    this.focusOnUpgrade(upgradeId);
     if (upgradeId === 'kara') {
       this.spawnBurst(this.kara.group.position.x, 1.5, this.kara.group.position.z, 24);
       this.cheerTimer = 0.8;
@@ -742,6 +889,26 @@ export class MeadowSceneController {
     if (upgradeId === 'kaitlyn') {
       this.spawnBurst(this.kaitlyn.group.position.x, 1.5, this.kaitlyn.group.position.z, 24);
       this.cheerTimer = 0.8;
+      return;
+    }
+    if (upgradeId === 'joshua') {
+      this.spawnBurst(this.joshua.group.position.x, 1.5, this.joshua.group.position.z, 24);
+      this.cheerTimer = 0.8;
+      return;
+    }
+    if (upgradeId === 'katy') {
+      this.spawnBurst(this.katy.group.position.x, 1.5, this.katy.group.position.z, 24);
+      this.cheerTimer = 0.8;
+      return;
+    }
+    if (upgradeId === 'causeway') {
+      this.spawnBurst(0.05, 1.4, 2.2, 24);
+      this.cheerTimer = 0.75;
+      return;
+    }
+    if (upgradeId === 'fence') {
+      this.spawnBurst(2.5, 1.6, 11.7, 24);
+      this.cheerTimer = 0.75;
       return;
     }
     const target = this.upgradeHandles[upgradeId].group.position;
@@ -878,8 +1045,8 @@ export class MeadowSceneController {
       const nowMs = performance.now();
       const rawDt = Math.max(0.001, (nowMs - this.lastTickMs) / 1000);
       this.lastTickMs = nowMs;
-      const dt = Math.min(rawDt, 0.05);
-      const camDt = Math.min(rawDt, 0.25);
+      const dt = Math.min(rawDt, this.isSoftwareGl ? 0.16 : 0.05);
+      const camDt = Math.min(rawDt, this.isSoftwareGl ? 0.36 : 0.25);
       this.elapsed += dt;
 
       this.updateScene(dt, camDt);
@@ -932,7 +1099,7 @@ export class MeadowSceneController {
     if (cheering) {
       const jump = Math.abs(Math.sin((cheerProgress + phaseOffset * 0.12) * Math.PI * 2)) * 1.02;
       char.bodyGroup.position.y = jump;
-      char.bodyGroup.rotation.y = cheerProgress * Math.PI * 2;
+      char.bodyGroup.rotation.y = Math.sin(cheerProgress * Math.PI * 4) * 0.38;
       const stretch = 1 + Math.sin(cheerProgress * Math.PI * 4) * 0.16;
       char.bodyGroup.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
       char.leftArm.rotation.z = -0.95;
@@ -943,6 +1110,13 @@ export class MeadowSceneController {
     } else {
       const bob = Math.sin(this.elapsed * 2.6 + phaseOffset) * 0.055;
       char.bodyGroup.position.y = Math.max(0, bob);
+      // Wrap full-turn cheer angle forward so characters never spin backward after cheering
+      while (char.bodyGroup.rotation.y > Math.PI) {
+        char.bodyGroup.rotation.y -= Math.PI * 2;
+      }
+      while (char.bodyGroup.rotation.y < -Math.PI) {
+        char.bodyGroup.rotation.y += Math.PI * 2;
+      }
       char.bodyGroup.rotation.y = THREE.MathUtils.damp(char.bodyGroup.rotation.y, 0, 8, dt);
       char.bodyGroup.rotation.z = THREE.MathUtils.damp(char.bodyGroup.rotation.z, 0, 8, dt);
       char.bodyGroup.scale.set(
@@ -1103,7 +1277,7 @@ export class MeadowSceneController {
       this.camera.lookAt(this.currentLookAt);
     } else {
       if (this.resettingView) {
-        const camLambda = 6.5;
+        const camLambda = this.slowResettingView ? 1.95 : 6.5;
         this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, DEFAULT_PLAYING_CAM_POS.x, camLambda, camDt);
         this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, DEFAULT_PLAYING_CAM_POS.y, camLambda, camDt);
         this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, DEFAULT_PLAYING_CAM_POS.z, camLambda, camDt);
@@ -1111,13 +1285,39 @@ export class MeadowSceneController {
         this.controls.target.y = THREE.MathUtils.damp(this.controls.target.y, DEFAULT_PLAYING_LOOK.y, camLambda, camDt);
         this.controls.target.z = THREE.MathUtils.damp(this.controls.target.z, DEFAULT_PLAYING_LOOK.z, camLambda, camDt);
 
+        const doneThreshold = this.slowResettingView ? 0.025 : 0.004;
         if (
-          this.camera.position.distanceToSquared(DEFAULT_PLAYING_CAM_POS) < 0.004 &&
-          this.controls.target.distanceToSquared(DEFAULT_PLAYING_LOOK) < 0.004
+          this.camera.position.distanceToSquared(DEFAULT_PLAYING_CAM_POS) < doneThreshold &&
+          this.controls.target.distanceToSquared(DEFAULT_PLAYING_LOOK) < doneThreshold
         ) {
           this.camera.position.copy(DEFAULT_PLAYING_CAM_POS);
           this.controls.target.copy(DEFAULT_PLAYING_LOOK);
           this.resettingView = false;
+          this.slowResettingView = false;
+        }
+      } else if (this.focusGlideActive) {
+        const camLambda = 6.2;
+        this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, this.focusTargetCamPos.x, camLambda, camDt);
+        this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, this.focusTargetCamPos.y, camLambda, camDt);
+        this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, this.focusTargetCamPos.z, camLambda, camDt);
+        this.controls.target.x = THREE.MathUtils.damp(this.controls.target.x, this.focusTargetLook.x, camLambda, camDt);
+        this.controls.target.y = THREE.MathUtils.damp(this.controls.target.y, this.focusTargetLook.y, camLambda, camDt);
+        this.controls.target.z = THREE.MathUtils.damp(this.controls.target.z, this.focusTargetLook.z, camLambda, camDt);
+
+        if (
+          this.camera.position.distanceToSquared(this.focusTargetCamPos) < 0.008 &&
+          this.controls.target.distanceToSquared(this.focusTargetLook) < 0.008
+        ) {
+          this.camera.position.copy(this.focusTargetCamPos);
+          this.controls.target.copy(this.focusTargetLook);
+          this.focusGlideActive = false;
+        }
+      } else if (this.focusedOnUpgrade) {
+        this.focusHoldTimer = Math.max(0, this.focusHoldTimer - Math.min(camDt, 0.25));
+        if (this.focusHoldTimer <= 0) {
+          this.focusedOnUpgrade = false;
+          this.slowResettingView = true;
+          this.resettingView = true;
         }
       } else if (this.glideSphericalActive) {
         const glideLambda = 8.5;
@@ -1144,10 +1344,11 @@ export class MeadowSceneController {
 
       if (this.cameraShakeTrauma > 0) {
         const shake = this.cameraShakeTrauma * this.cameraShakeTrauma * 0.14;
-        this.controls.target.y = DEFAULT_PLAYING_LOOK.y + Math.sin(this.elapsed * 42) * shake;
+        const baseY = this.focusedOnUpgrade ? this.focusTargetLook.y : DEFAULT_PLAYING_LOOK.y;
+        this.controls.target.y = baseY + Math.sin(this.elapsed * 42) * shake;
         this.cameraShakeTrauma = Math.max(0, this.cameraShakeTrauma - dt * 1.4);
         if (this.cameraShakeTrauma === 0) {
-          this.controls.target.y = DEFAULT_PLAYING_LOOK.y;
+          this.controls.target.y = baseY;
         }
       }
 
@@ -1155,7 +1356,7 @@ export class MeadowSceneController {
       this.currentLookAt.copy(this.controls.target);
     }
 
-    // 2. Kara (bunny) & Kaitlyn (chick) kinematics
+    // 2. Kara (bunny), Mira (chick), Kaitlyn (bear) & Katy (pig) kinematics
     const cheering = this.cheerTimer > 0;
     const cheerProgress = cheering ? 1 - this.cheerTimer / 0.95 : 0;
     const wobbling = !cheering && this.wobbleTimer > 0;
@@ -1166,10 +1367,14 @@ export class MeadowSceneController {
     }
     this.animateCharacter(this.kara, 0, dt, cheering, cheerProgress, wobbling);
     this.animateCharacter(this.kaitlyn, 1.3, dt, cheering, cheerProgress, wobbling);
+    this.animateCharacter(this.joshua, 2.4, dt, cheering, cheerProgress, wobbling);
+    this.animateCharacter(this.katy, 3.5, dt, cheering, cheerProgress, wobbling);
 
     // 3. Upgradable garden animations & visiting critter bounce
     (
-      Object.keys(this.upgradeHandles) as Array<Exclude<UpgradeId, 'kara' | 'kaitlyn'>>
+      Object.keys(this.upgradeHandles) as Array<
+        Exclude<UpgradeId, 'kara' | 'kaitlyn' | 'joshua' | 'katy'>
+      >
     ).forEach((id) => {
       this.upgradeHandles[id].update(this.elapsed, dt);
     });

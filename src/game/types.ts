@@ -7,11 +7,17 @@ export type GameScreenState = 'title' | 'playing' | 'paused' | 'gameover';
 export type UpgradeId =
   | 'kara'
   | 'kaitlyn'
+  | 'joshua'
+  | 'katy'
   | 'cottage'
+  | 'causeway'
   | 'orchard'
+  | 'pond'
   | 'lanterns'
   | 'well'
-  | 'windmill';
+  | 'windmill'
+  | 'fence'
+  | 'farm';
 
 export type VisitorSpecies = 'rabbit' | 'squirrel';
 

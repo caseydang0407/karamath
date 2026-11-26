@@ -61,48 +61,7 @@ export function createMeadowIsland(textures: ProceduralTextureSet): THREE.Group 
   lowerRock.position.y = -5.3;
   group.add(lowerRock);
 
-  // 3. Perimeter cozy wooden fence posts & rails along the back arc
-  const woodMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    map: textures.woodMap,
-    roughness: 0.78,
-    metalness: 0.05,
-  });
-  const fenceAngles = [-2.55, -2.2, -1.85, -1.25, -0.9, -0.55];
-  const fenceR = 11.4;
-  let prevPos: THREE.Vector3 | null = null;
-  for (const ang of fenceAngles) {
-    const fx = Math.cos(ang) * fenceR;
-    const fz = Math.sin(ang) * fenceR;
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.15, 10), woodMat);
-    post.position.set(fx, 0.575, fz);
-    post.castShadow = true;
-    group.add(post);
-
-    const cap = new THREE.Mesh(
-      new THREE.ConeGeometry(0.18, 0.22, 10),
-      new THREE.MeshStandardMaterial({ color: 0xe6a15c, roughness: 0.65 })
-    );
-    cap.position.set(fx, 1.22, fz);
-    group.add(cap);
-
-    const currPos = new THREE.Vector3(fx, 0.55, fz);
-    if (prevPos && prevPos.distanceTo(currPos) < 4.8) {
-      const len = prevPos.distanceTo(currPos);
-      const railGeo = new THREE.BoxGeometry(0.08, 0.12, len);
-      const mid = prevPos.clone().add(currPos).multiplyScalar(0.5);
-      for (const ry of [0.42, 0.82]) {
-        const rail = new THREE.Mesh(railGeo, woodMat);
-        rail.position.set(mid.x, ry, mid.z);
-        rail.lookAt(currPos.x, ry, currPos.z);
-        rail.castShadow = true;
-        group.add(rail);
-      }
-    }
-    prevPos = currPos;
-  }
-
-  // 4. Colorful wildflowers scattered across the meadow
+  // 3. Colorful wildflowers scattered across the meadow
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
   const flowerGeo = new THREE.CylinderGeometry(0.14, 0.05, 0.12, 6);
@@ -885,7 +844,7 @@ export function createKaitlynChick(textures: ProceduralTextureSet): CharacterHan
   chickFigure.add(violetCap);
 
   const setLevel = (level: number) => {
-    const lv = Math.max(0, Math.min(21, level));
+    const lv = Math.max(0, Math.min(20, level));
     root.visible = lv >= 1;
     if (lv === 0) return;
 
@@ -900,7 +859,7 @@ export function createKaitlynChick(textures: ProceduralTextureSet): CharacterHan
       let s = 0.72;
       if (lv >= 8) s = 0.84;
       if (lv >= 11) s = 0.96;
-      if (lv >= 17) s = 1.08;
+      if (lv >= 16) s = 1.08;
       chickFigure.scale.setScalar(s);
     }
 
@@ -913,11 +872,11 @@ export function createKaitlynChick(textures: ProceduralTextureSet): CharacterHan
     whiteBowtie.visible = lv >= 13;
     pinkSkirt.visible = lv >= 14;
     leftLegObj.sock.visible = lv >= 15;
-    rightLegObj.sock.visible = lv >= 16;
-    leftLegObj.sneaker.visible = lv >= 18;
-    rightLegObj.sneaker.visible = lv >= 19;
-    violetCap.visible = lv >= 20;
-    shovel.visible = lv >= 21;
+    rightLegObj.sock.visible = lv >= 15;
+    leftLegObj.sneaker.visible = lv >= 17;
+    rightLegObj.sneaker.visible = lv >= 18;
+    violetCap.visible = lv >= 19;
+    shovel.visible = lv >= 20;
   };
 
   setLevel(0);
