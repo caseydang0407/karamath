@@ -1,0 +1,6 @@
+{
+  "name": "Sunny Sprout Math",
+  "description": "A cozy 3D math adventure game for kids with garden upgrades, combo multipliers, synth sound effects, offline PWA support, and a parent progress dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

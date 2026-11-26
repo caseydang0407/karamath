@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: 'Nunito', ui-rounded, system-ui, -apple-system, sans-serif;
+    background-color: #cdeefd;
+    color: #2c241b;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: 'Fredoka', 'Nunito', ui-rounded, system-ui, sans-serif;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.title-stroke {
+  paint-order: stroke fill;
+  -webkit-text-stroke: 4px #4d2f16;
+  text-shadow: 0 3px 0 rgba(77, 47, 22, 0.35);
+}
+
+.hud-num-stroke {
+  paint-order: stroke fill;
+  -webkit-text-stroke: 3px #422914;
+  text-shadow: 0 2px 0 rgba(66, 41, 20, 0.3);
+}
+
+@keyframes floatPop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.8);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -6px) scale(1.08);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -26px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -42px) scale(0.95);
+  }
+}
+
+.animate-float-pop {
+  animation: floatPop 1.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Custom clean scrollbar for modals */
+.cozy-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.cozy-scroll::-webkit-scrollbar-track {
+  background: rgba(235, 220, 195, 0.5);
+  border-radius: 999px;
+}
+.cozy-scroll::-webkit-scrollbar-thumb {
+  background: #c7a67b;
+  border-radius: 999px;
+}
