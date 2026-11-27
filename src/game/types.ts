@@ -132,6 +132,7 @@ export interface PlayerProgress {
   selectedOps: Operation[];
   selectedDifficulty: DifficultyLevel;
   adaptiveDifficulty: boolean;
+  adaptiveManual?: boolean;
 }
 
 export interface RoundSummary {

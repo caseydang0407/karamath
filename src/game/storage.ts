@@ -54,7 +54,8 @@ export function createInitialProgress(): PlayerProgress {
     inputMode: 'choices',
     selectedOps: ['add', 'sub'],
     selectedDifficulty: 1,
-    adaptiveDifficulty: true,
+    adaptiveDifficulty: false,
+    adaptiveManual: false,
   };
 }
 
@@ -106,6 +107,8 @@ function hydrateProgress(parsed: Partial<PlayerProgress>): PlayerProgress {
       Array.isArray(parsed.selectedOps) && parsed.selectedOps.length > 0
         ? parsed.selectedOps
         : base.selectedOps,
+    adaptiveDifficulty: parsed.adaptiveManual === true ? Boolean(parsed.adaptiveDifficulty) : false,
+    adaptiveManual: parsed.adaptiveManual === true,
   };
 }
 
@@ -153,6 +156,7 @@ export function writeProgressCookie(progress: PlayerProgress): void {
       selectedOps: progress.selectedOps,
       selectedDifficulty: progress.selectedDifficulty,
       adaptiveDifficulty: progress.adaptiveDifficulty,
+      adaptiveManual: progress.adaptiveManual,
     };
     const encoded = encodeURIComponent(JSON.stringify(compact));
     if (encoded.length <= 3900) {

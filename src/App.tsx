@@ -678,14 +678,23 @@ export default function App() {
           onSelectAllOps={handleSelectAllOps}
           onSelectDifficulty={(tier: DifficultyLevel) => {
             synthAudio.playClick();
-            setProgress((prev) => ({ ...prev, selectedDifficulty: tier }));
+            setProgress((prev) => ({
+              ...prev,
+              selectedDifficulty: tier,
+              adaptiveDifficulty: false,
+              adaptiveManual: false,
+            }));
           }}
           onToggleAdaptive={() => {
             synthAudio.playClick();
-            setProgress((prev) => ({
-              ...prev,
-              adaptiveDifficulty: !prev.adaptiveDifficulty,
-            }));
+            setProgress((prev) => {
+              const nextVal = !prev.adaptiveDifficulty;
+              return {
+                ...prev,
+                adaptiveDifficulty: nextVal,
+                adaptiveManual: nextVal,
+              };
+            });
           }}
           onSelectInputMode={(mode) => {
             synthAudio.playClick();

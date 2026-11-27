@@ -637,8 +637,8 @@ export const OPERATION_LABELS: Record<Operation, { name: string; symbol: '+' | '
 };
 
 export const DIFFICULTY_LABELS: Record<DifficultyLevel, { name: string; subtitle: string }> = {
-  1: { name: 'Sprout', subtitle: '1-Digit Basics (1–9)' },
-  2: { name: 'Sapling', subtitle: '1 & 2-Digit Mix' },
+  1: { name: 'Sprout', subtitle: '1-Digit Only (1–9)' },
+  2: { name: 'Sapling', subtitle: 'Max 2 Digits (1–99)' },
   3: { name: 'Oak', subtitle: '2-Digit Challenge' },
   4: { name: 'Starlight', subtitle: 'Mastery & Big Numbers' },
 };
@@ -817,8 +817,8 @@ export function generateProblem(
       a = randInt(1, 9, rng);
       b = randInt(1, 9, rng);
     } else if (tier === 2) {
-      a = randInt(10, 45, rng);
-      b = randInt(2, 19, rng);
+      a = randInt(10, 49, rng);
+      b = randInt(2, Math.min(29, 99 - a), rng);
     } else if (tier === 3) {
       a = randInt(15, 79, rng);
       b = randInt(12, 68, rng);
@@ -832,8 +832,8 @@ export function generateProblem(
       a = randInt(2, 9, rng);
       b = randInt(1, a, rng);
     } else if (tier === 2) {
-      a = randInt(12, 49, rng);
-      b = randInt(3, Math.min(19, a - 1), rng);
+      a = randInt(12, 69, rng);
+      b = randInt(3, Math.min(29, a - 1), rng);
     } else if (tier === 3) {
       a = randInt(28, 99, rng);
       b = randInt(11, a - 5, rng);
@@ -862,14 +862,25 @@ export function generateProblem(
     let divisor = 2;
     let quotient = 2;
     if (tier === 1) {
-      divisor = randInt(1, 5, rng);
-      quotient = randInt(1, 5, rng);
+      // Strictly 1-digit dividend (1..9), divisor (1..9), and quotient (1..9)
+      const corePairs: Array<[number, number]> = [
+        [4, 2], [6, 2], [6, 3], [8, 2], [8, 4], [9, 3],
+      ];
+      const extraPairs: Array<[number, number]> = [
+        [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1], [9, 1],
+        [2, 2], [3, 3], [4, 4], [5, 5], [6, 6], [7, 7], [8, 8], [9, 9],
+      ];
+      const poolPairs = rng() < 0.72 ? corePairs : extraPairs;
+      const [divA, divB] = poolPairs[randInt(0, poolPairs.length - 1, rng)];
+      divisor = divB;
+      quotient = divA / divB;
     } else if (tier === 2) {
       divisor = randInt(2, 9, rng);
       quotient = randInt(2, 9, rng);
     } else if (tier === 3) {
       divisor = randInt(2, 9, rng);
-      quotient = randInt(6, 15, rng);
+      const maxQ = Math.floor(99 / divisor);
+      quotient = randInt(Math.min(6, maxQ), maxQ, rng);
     } else {
       divisor = randInt(3, 12, rng);
       quotient = randInt(8, 18, rng);

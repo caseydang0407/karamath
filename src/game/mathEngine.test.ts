@@ -47,7 +47,7 @@ test('generates valid problems for all operations and tiers with 4 unique non-ne
 
   for (const op of ops) {
     for (const tier of tiers) {
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 40; i++) {
         const p = generateProblem([op], tier, rng);
         assert.equal(p.operation, op);
         assert.equal(p.choices.length, 4);
@@ -61,8 +61,23 @@ test('generates valid problems for all operations and tiers with 4 unique non-ne
         if (op === 'mul') assert.equal(p.a * p.b, p.answer);
         if (op === 'div') assert.equal(p.a / p.b, p.answer);
 
-        if (tier === 1 && (op === 'add' || op === 'sub')) {
-          assert.ok(p.a <= 9 && p.b <= 9, 'tier 1 add/sub must be 1-digit');
+        if (tier === 1) {
+          assert.ok(p.a >= 1 && p.a <= 9 && p.b >= 1 && p.b <= 9, `tier 1 ${op} operands must be strictly 1-digit (${p.a} ${p.symbol} ${p.b})`);
+          if (op === 'sub' || op === 'div') {
+            assert.ok(p.answer <= 9, `tier 1 ${op} answer must be 1-digit`);
+          }
+        }
+        if (tier === 2) {
+          assert.ok(
+            p.a <= 99 && p.b <= 99 && p.answer <= 99,
+            `tier 2 ${op} must be max 2 digits (${p.a} ${p.symbol} ${p.b} = ${p.answer})`
+          );
+        }
+        if (tier === 3) {
+          assert.ok(
+            p.a <= 99 && p.b <= 99,
+            `tier 3 ${op} operands must be max 2 digits (${p.a} ${p.symbol} ${p.b})`
+          );
         }
       }
     }
@@ -79,7 +94,8 @@ test('combo multiplier scales up and respects pinwheel and flower upgrade caps',
   assert.equal(getComboMultiplier(2, 0, 1), 1.75);
 });
 
-test('adaptive difficulty steps up cleanly every 4 streak', () => {
+test('adaptive difficulty steps up cleanly every 4 streak and defaults to off', () => {
+  assert.equal(createInitialProgress().adaptiveDifficulty, false);
   assert.equal(getEffectiveTier(1, false, 10), 1);
   assert.equal(getEffectiveTier(1, true, 0), 1);
   assert.equal(getEffectiveTier(1, true, 4), 2);
