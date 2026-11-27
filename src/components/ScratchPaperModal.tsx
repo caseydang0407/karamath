@@ -8,18 +8,12 @@ import {
   MoveHorizontal,
   PenLine,
   RotateCcw,
-  Sparkles,
+  Target,
   Trash2,
   X,
 } from 'lucide-react';
 import type { MathProblem, ScratchStrategy } from '../game/types';
-import {
-  breakEggContainer,
-  buildEggUnits,
-  type EggUnit,
-  hatchExactEggs,
-  sumEggUnits,
-} from '../game/visualGroups';
+import { buildMakeTenPlan } from '../game/makeTen';
 
 interface ScratchPaperModalProps {
   problem: MathProblem;
@@ -37,7 +31,7 @@ const STRATEGIES: Array<{
   { id: 'vertical', label: 'Vertical & Alignment', shortLabel: 'Vertical', icon: AlignRight },
   { id: 'numberline', label: 'Number Line', shortLabel: 'Number Line', icon: MoveHorizontal },
   { id: 'blocks', label: 'Base-10 Blocks', shortLabel: 'Base Blocks', icon: Boxes },
-  { id: 'visual', label: 'Visualization', shortLabel: 'Visual', icon: Sparkles },
+  { id: 'make10', label: 'Make a 10', shortLabel: 'Make 10', icon: Target },
 ];
 
 const PEN_COLORS = [
@@ -70,15 +64,18 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
   onClose,
 }) => {
   const [strategy, setStrategy] = useState<ScratchStrategy>('vertical');
-  const [carryMarks, setCarryMarks] = useState<number[]>([0, 0, 0]);
   const [penColor, setPenColor] = useState<string>('#1e293b');
   const [eraserOn, setEraserOn] = useState(false);
 
-  // Vertical alignment columns count (max 3 digits: H, T, O)
+  // Vertical alignment columns count (adapts dynamically from 2 up to 6+ digits)
   const colCount = useMemo(() => {
     const maxVal = Math.max(problem.a, problem.b, problem.answer);
-    return maxVal >= 100 ? 3 : 2;
+    return Math.max(2, String(maxVal).length);
   }, [problem]);
+
+  const [carryMarks, setCarryMarks] = useState<number[]>(() =>
+    Array.from({ length: colCount }, () => 0)
+  );
 
   // Interactive Subtraction Borrowing state & Result Digit Entry
   const [topWorkingDigits, setTopWorkingDigits] = useState<Array<number | null>>(() =>
@@ -105,7 +102,7 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
 
   // Reset vertical helper & result states when problem changes
   useEffect(() => {
-    setCarryMarks([0, 0, 0]);
+    setCarryMarks(Array.from({ length: colCount }, () => 0));
     setTopWorkingDigits(getInitialWorkingDigits(problem.a, colCount));
     setBorrowedFlags(Array.from({ length: colCount }, () => false));
     setResultInputs(Array.from({ length: colCount }, () => ''));
@@ -231,7 +228,7 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
   };
 
   const resetVerticalHelpers = () => {
-    setCarryMarks([0, 0, 0]);
+    setCarryMarks(Array.from({ length: colCount }, () => 0));
     setTopWorkingDigits(getInitialWorkingDigits(problem.a, colCount));
     setBorrowedFlags(Array.from({ length: colCount }, () => false));
     setResultInputs(Array.from({ length: colCount }, () => ''));
@@ -291,6 +288,10 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
   };
 
   const coachSteps = useMemo(() => {
+    if (strategy === 'make10') {
+      return buildMakeTenPlan(problem).steps;
+    }
+
     const { a, b, operation } = problem;
     const onesA = a % 10;
     const onesB = b % 10;
@@ -335,19 +336,33 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
       `Ask: "How many equal groups of ${b} fit into ${a}?"`,
       `Type your quotient into the box on top of the division house and check!`,
     ];
-  }, [problem]);
+  }, [problem, strategy]);
 
-  const colHeaders =
-    colCount === 3
-      ? [
-          { label: 'H', name: 'Hundreds', color: 'text-[#7e22ce] bg-[#f3e8ff]' },
-          { label: 'T', name: 'Tens', color: 'text-[#1d4ed8] bg-[#dbeafe]' },
-          { label: 'O', name: 'Ones', color: 'text-[#15803d] bg-[#dcfce7]' },
-        ]
-      : [
-          { label: 'T', name: 'Tens', color: 'text-[#1d4ed8] bg-[#dbeafe]' },
-          { label: 'O', name: 'Ones', color: 'text-[#15803d] bg-[#dcfce7]' },
-        ];
+  const placePalette = [
+    { label: 'O', name: 'Ones', color: 'text-[#15803d] bg-[#dcfce7]' },
+    { label: 'T', name: 'Tens', color: 'text-[#1d4ed8] bg-[#dbeafe]' },
+    { label: 'H', name: 'Hundreds', color: 'text-[#7e22ce] bg-[#f3e8ff]' },
+    { label: 'Th', name: 'Thousands', color: 'text-[#b45309] bg-[#fef3c7]' },
+    { label: 'TTh', name: 'Ten-Thousands', color: 'text-[#be123c] bg-[#ffe4e6]' },
+    { label: 'HTh', name: 'Hundred-Thousands', color: 'text-[#0f766e] bg-[#ccfbf1]' },
+    { label: 'M', name: 'Millions', color: 'text-[#4338ca] bg-[#e0e7ff]' },
+  ];
+  const colHeaders = Array.from({ length: colCount }, (_, idx) => {
+    const placeIdx = colCount - 1 - idx;
+    return (
+      placePalette[placeIdx] ?? {
+        label: `10^${placeIdx}`,
+        name: `Place ${placeIdx}`,
+        color: 'text-[#334155] bg-[#f1f5f9]',
+      }
+    );
+  });
+
+  const opColPx = colCount >= 5 ? 32 : 44;
+  const digitColPx = colCount >= 6 ? 38 : colCount === 5 ? 44 : colCount === 4 ? 50 : 56;
+  const gridTemplateColumns = `${opColPx}px repeat(${colCount}, ${digitColPx}px)`;
+  const gridGapClass = colCount >= 5 ? 'gap-1' : 'gap-2';
+  const digitFontClass = colCount >= 6 ? 'text-2xl' : colCount === 5 ? 'text-3xl' : 'text-4xl';
 
   const digitsA = getColumnDigits(problem.a, colCount);
   const digitsB = getColumnDigits(problem.b, colCount);
@@ -457,23 +472,23 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                         <input
                           type="text"
                           inputMode="numeric"
-                          maxLength={3}
+                          maxLength={6}
                           aria-label="Enter division quotient"
                           data-testid="vertical-div-input"
                           value={divInput}
                           onChange={(e) => {
-                            setDivInput(e.target.value.replace(/\D/g, '').slice(0, 3));
+                            setDivInput(e.target.value.replace(/\D/g, '').slice(0, 6));
                             setVerticalFeedback(null);
                           }}
                           placeholder="?"
-                          className="h-11 w-20 rounded-xl border-2 border-[#0284c7] bg-white text-center font-display text-2xl font-bold text-[#0c4a6e] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#38bdf8]"
+                          className="h-11 w-32 rounded-xl border-2 border-[#0284c7] bg-white text-center font-display text-2xl font-bold text-[#0c4a6e] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#38bdf8]"
                         />
                       </div>
-                      <div className="flex items-center gap-2 font-display text-4xl font-bold text-[#1e293b] tabular-nums">
+                      <div className="flex items-center gap-2 font-display text-3xl sm:text-4xl font-bold text-[#1e293b] tabular-nums">
                         <span className="rounded-xl bg-[#f3e8ff] px-3 py-1 text-[#6b21a8]">
                           {problem.b}
                         </span>
-                        <div className="rounded-tl-md border-t-4 border-l-4 border-[#1e293b] px-5 pt-2 pb-1">
+                        <div className="rounded-tl-md border-t-4 border-l-4 border-[#1e293b] px-4 pt-2 pb-1">
                           {problem.a}
                         </div>
                       </div>
@@ -483,14 +498,12 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                     </div>
                   ) : (
                     /* Stacked Place Value Alignment Grid with Borrow & Result Input */
-                    <div className="flex flex-col items-center rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] px-4 py-4">
+                    <div className="flex flex-col items-center overflow-x-auto rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] px-3 py-4">
                       <div className="inline-block">
                         {/* Place Value Column Headers */}
                         <div
-                          className="mb-2 grid items-center gap-2 text-center"
-                          style={{
-                            gridTemplateColumns: `44px repeat(${colCount}, 56px)`,
-                          }}
+                          className={`mb-2 grid items-center ${gridGapClass} text-center`}
+                          style={{ gridTemplateColumns }}
                         >
                           <div />
                           {colHeaders.map((h) => (
@@ -506,10 +519,8 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
 
                         {/* Interactive Borrow (Subtraction) or Carry (Add/Mul) Row */}
                         <div
-                          className="mb-1.5 grid items-center gap-2 text-center"
-                          style={{
-                            gridTemplateColumns: `44px repeat(${colCount}, 56px)`,
-                          }}
+                          className={`mb-1.5 grid items-center ${gridGapClass} text-center`}
+                          style={{ gridTemplateColumns }}
                         >
                           <div className="text-[10px] font-extrabold text-[#64748b]">
                             {problem.operation === 'sub' ? 'Work' : 'Carry'}
@@ -528,7 +539,7 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                                   {wasChanged && working !== null ? (
                                     <span
                                       data-testid={`borrowed-value-${idx}`}
-                                      className="inline-flex min-w-[36px] items-center justify-center rounded-full border-2 border-[#dc2626] bg-[#fee2e2] px-1.5 py-0.5 font-display text-sm font-bold text-[#b91c1c] tabular-nums"
+                                      className="inline-flex min-w-[30px] items-center justify-center rounded-full border-2 border-[#dc2626] bg-[#fee2e2] px-1 py-0.5 font-display text-xs font-bold text-[#b91c1c] tabular-nums"
                                     >
                                       {working}
                                     </span>
@@ -537,9 +548,9 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                                       type="button"
                                       data-testid={`borrow-btn-${idx}`}
                                       onClick={() => handleBorrowFromColumn(idx)}
-                                      className="rounded-lg border border-dashed border-[#f59e0b] bg-[#fef3c7] px-1.5 py-0.5 text-[10px] font-extrabold text-[#92400e] hover:bg-[#fde68a]"
+                                      className="rounded-lg border border-dashed border-[#f59e0b] bg-[#fef3c7] px-1 py-0.5 text-[9px] font-extrabold text-[#92400e] hover:bg-[#fde68a]"
                                     >
-                                      Borrow
+                                      {colCount >= 5 ? 'Brw' : 'Borrow'}
                                     </button>
                                   ) : (
                                     <span className="h-6" />
@@ -556,7 +567,7 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                                 data-testid={`carry-btn-${idx}`}
                                 aria-label={`Set carry note for column ${idx + 1}`}
                                 onClick={() => cycleCarryMark(idx)}
-                                className={`mx-auto flex h-7 w-10 items-center justify-center rounded-full border-2 border-dashed text-xs font-extrabold transition ${
+                                className={`mx-auto flex h-7 ${colCount >= 5 ? 'w-8' : 'w-10'} items-center justify-center rounded-full border-2 border-dashed text-xs font-extrabold transition ${
                                   carryVal > 0
                                     ? 'border-[#dc2626] bg-[#fee2e2] text-[#b91c1c]'
                                     : 'border-[#cbd5e1] bg-white text-[#94a3b8] hover:border-[#f59e0b]'
@@ -570,10 +581,8 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
 
                         {/* Top Number Row (clicking Tens/Hundreds in subtraction also triggers Borrow!) */}
                         <div
-                          className="grid items-center gap-2 text-center font-display text-4xl font-bold text-[#1e293b] tabular-nums"
-                          style={{
-                            gridTemplateColumns: `44px repeat(${colCount}, 56px)`,
-                          }}
+                          className={`grid items-center ${gridGapClass} text-center font-display ${digitFontClass} font-bold text-[#1e293b] tabular-nums`}
+                          style={{ gridTemplateColumns }}
                         >
                           <div />
                           {digitsA.map((d, idx) => {
@@ -614,12 +623,10 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
 
                         {/* Operator + Bottom Number Row */}
                         <div
-                          className="mt-1.5 grid items-center gap-2 text-center font-display text-4xl font-bold text-[#1e293b] tabular-nums"
-                          style={{
-                            gridTemplateColumns: `44px repeat(${colCount}, 56px)`,
-                          }}
+                          className={`mt-1.5 grid items-center ${gridGapClass} text-center font-display ${digitFontClass} font-bold text-[#1e293b] tabular-nums`}
+                          style={{ gridTemplateColumns }}
                         >
-                          <div className="text-3xl text-[#b45309]">{problem.symbol}</div>
+                          <div className="text-2xl text-[#b45309] sm:text-3xl">{problem.symbol}</div>
                           {digitsB.map((d, idx) => (
                             <div
                               key={idx}
@@ -637,10 +644,8 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                         {/* Equals Line & Interactive Answer Digit Inputs */}
                         <div className="my-2 h-1 w-full rounded-full bg-[#334155]" />
                         <div
-                          className="grid items-center gap-2 text-center"
-                          style={{
-                            gridTemplateColumns: `44px repeat(${colCount}, 56px)`,
-                          }}
+                          className={`grid items-center ${gridGapClass} text-center`}
+                          style={{ gridTemplateColumns }}
                         >
                           <div className="text-lg font-extrabold text-[#64748b]">=</div>
                           {colHeaders.map((h, idx) => (
@@ -662,7 +667,7 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                                 }
                               }}
                               placeholder={h.label}
-                              className="h-12 w-full rounded-xl border-2 border-[#0284c7] bg-white text-center font-display text-2xl font-bold text-[#0f172a] tabular-nums placeholder:text-xs placeholder:font-extrabold placeholder:text-[#94a3b8] focus:outline-none focus:ring-2 focus:ring-[#38bdf8]"
+                              className="h-11 w-full rounded-xl border-2 border-[#0284c7] bg-white text-center font-display text-xl font-bold text-[#0f172a] tabular-nums placeholder:text-[10px] placeholder:font-extrabold placeholder:text-[#94a3b8] focus:outline-none focus:ring-2 focus:ring-[#38bdf8] sm:h-12 sm:text-2xl"
                             />
                           ))}
                         </div>
@@ -711,8 +716,8 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
               {strategy === 'blocks' && (
                 <BaseBlocksView problem={problem} onSubmitAnswer={onSubmitAnswer} />
               )}
-              {strategy === 'visual' && (
-                <VisualGroupsView problem={problem} onSubmitAnswer={onSubmitAnswer} />
+              {strategy === 'make10' && (
+                <MakeTenView problem={problem} onSubmitAnswer={onSubmitAnswer} />
               )}
             </div>
 
@@ -1599,385 +1604,839 @@ const BaseBlocksView: React.FC<{
   );
 };
 
-/* --- Cute SVG Eggs & Hatched Chicks Artwork for Visualization Methods --- */
+/* --- Interactive Make a 10 Strategy (Ten-Frames & Friendly 10 Bridges) --- */
 
-const WholeEggSvg: React.FC<{ size?: number; dimmed?: boolean }> = ({
-  size = 24,
-  dimmed = false,
-}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 28 32"
-    aria-hidden="true"
-    className={dimmed ? 'opacity-65' : undefined}
-  >
-    <path
-      d="M14 2 C20 2 24 11 24 19 C24 26 20 30 14 30 C8 30 4 26 4 19 C4 11 8 2 14 2 Z"
-      fill="#fef3c7"
-      stroke="#b45309"
-      strokeWidth="2.2"
-    />
-    <ellipse cx="10.5" cy="10" rx="2.4" ry="4" fill="#fffbeb" opacity="0.85" />
-    <circle cx="17.5" cy="14" r="1.3" fill="#d97706" opacity="0.55" />
-    <circle cx="15" cy="21" r="1.1" fill="#d97706" opacity="0.45" />
-    <circle cx="10" cy="19" r="1.2" fill="#d97706" opacity="0.45" />
-  </svg>
-);
+type TenFrameSlotKind = 'primary' | 'added' | 'crossed' | 'target' | 'empty';
 
-const HatchedChickSvg: React.FC<{ size?: number; crossed?: boolean; dimmed?: boolean }> = ({
-  size = 28,
-  crossed = false,
-  dimmed = false,
-}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 32 32"
-    aria-hidden="true"
-    className={crossed ? 'opacity-80' : dimmed ? 'opacity-65' : undefined}
-  >
-    {/* Fluffy yellow chick head & body peeking out */}
-    <circle cx="16" cy="13.5" r="8.2" fill="#fde047" stroke="#b45309" strokeWidth="1.8" />
-    {/* Little top tuft */}
-    <path
-      d="M15 5.2 Q16 2 18.2 4.5 Q19 2.6 20 5.5"
-      fill="none"
-      stroke="#b45309"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-    />
-    {/* Eyes */}
-    <circle cx="13" cy="12.5" r="1.35" fill="#1e293b" />
-    <circle cx="19" cy="12.5" r="1.35" fill="#1e293b" />
-    <circle cx="12.6" cy="12" r="0.45" fill="#ffffff" />
-    <circle cx="18.6" cy="12" r="0.45" fill="#ffffff" />
-    {/* Rosy cheeks */}
-    <circle cx="10.6" cy="14.5" r="1.3" fill="#fb7185" opacity="0.55" />
-    <circle cx="21.4" cy="14.5" r="1.3" fill="#fb7185" opacity="0.55" />
-    {/* Orange beak */}
-    <polygon points="14.2,14.2 17.8,14.2 16,17.2" fill="#f97316" stroke="#9a3412" strokeWidth="1" />
-    {/* Cracked white bottom eggshell */}
-    <path
-      d="M6.5 18.5 L10 21.5 L13.5 18 L16.5 21.5 L19.8 18 L23 21.2 L25.5 18.5 C25.5 25.5 21.5 29.5 16 29.5 C10.5 29.5 6.5 25.5 6.5 18.5 Z"
-      fill="#fffbeb"
-      stroke="#92400e"
-      strokeWidth="1.8"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+const TenFrameGrid: React.FC<{
+  primaryCount: number;
+  addedCount?: number;
+  targetNeeded?: number;
+  crossedFromEnd?: number;
+  crossedColor?: 'red' | 'amber';
+  completeHighlight?: boolean;
+  label?: string;
+  interactiveHint?: string;
+  onSlotClick?: (slotKind: TenFrameSlotKind, idx: number) => void;
+}> = ({
+  primaryCount,
+  addedCount = 0,
+  targetNeeded = 0,
+  crossedFromEnd = 0,
+  crossedColor = 'red',
+  completeHighlight = false,
+  label,
+  interactiveHint,
+  onSlotClick,
+}) => {
+  const filledTotal = Math.min(10, primaryCount + addedCount);
+  const crossedStartIdx = Math.max(0, filledTotal - crossedFromEnd);
 
-const EggContainerBadge: React.FC<{
-  value: 1 | 10 | 100;
-  hatched: boolean;
-  kind: 'egg' | 'chick';
-}> = ({ value, hatched, kind }) => {
-  const isHundred = value === 100;
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-xl border-2 px-2 py-1 font-display text-xs font-bold shadow-xs transition ${
-        hatched
-          ? 'border-[#f59e0b] bg-[#fef3c7] text-[#92400e]'
-          : isHundred
-            ? 'border-[#7e22ce] bg-[#f3e8ff] text-[#581c87]'
-            : 'border-[#0284c7] bg-[#e0f2fe] text-[#0c4a6e]'
+    <div
+      className={`inline-flex flex-col rounded-2xl border-2 p-2 transition ${
+        completeHighlight
+          ? 'border-[#16a34a] bg-[#f0fdf4] shadow-xs'
+          : 'border-[#94a3b8] bg-white'
       }`}
     >
-      {hatched || kind === 'chick' ? (
-        <HatchedChickSvg size={18} />
-      ) : (
-        <WholeEggSvg size={16} />
+      {label && (
+        <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-extrabold tracking-wide text-[#475569] uppercase">
+          <span>{label}</span>
+          <span className="tabular-nums">
+            {Math.max(0, filledTotal - crossedFromEnd)} / 10
+          </span>
+        </div>
       )}
-      <span>{value}</span>
-    </span>
+      <div className="grid grid-cols-5 gap-1.5">
+        {Array.from({ length: 10 }).map((_, idx) => {
+          const isPrimary = idx < primaryCount;
+          const isAdded = idx >= primaryCount && idx < primaryCount + addedCount;
+          const isCrossed = idx < filledTotal && idx >= crossedStartIdx;
+          const isTarget =
+            !isPrimary &&
+            !isAdded &&
+            idx < primaryCount + addedCount + targetNeeded;
+
+          const slotKind: TenFrameSlotKind = isCrossed
+            ? 'crossed'
+            : isPrimary
+              ? 'primary'
+              : isAdded
+                ? 'added'
+                : isTarget
+                  ? 'target'
+                  : 'empty';
+
+          const isClickable = Boolean(
+            onSlotClick &&
+              (slotKind === 'target' ||
+                slotKind === 'added' ||
+                slotKind === 'primary' ||
+                slotKind === 'crossed')
+          );
+
+          const cellContent = isCrossed ? (
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-full border-2 text-[11px] font-black ${
+                crossedColor === 'amber'
+                  ? 'border-[#d97706] bg-[#fef3c7] text-[#b45309] line-through'
+                  : 'border-[#dc2626] bg-[#fee2e2] text-[#b91c1c]'
+              }`}
+            >
+              ×
+            </span>
+          ) : isPrimary ? (
+            <span className="h-5 w-5 rounded-full border-2 border-[#1d4ed8] bg-[#3b82f6] shadow-xs" />
+          ) : isAdded ? (
+            <span className="h-5 w-5 rounded-full border-2 border-[#c2410c] bg-[#f97316] shadow-xs" />
+          ) : isTarget ? (
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#f59e0b]" />
+          ) : null;
+
+          if (isClickable && onSlotClick) {
+            return (
+              <button
+                key={idx}
+                type="button"
+                data-testid={`tenframe-slot-${idx}`}
+                aria-label={`Ten frame slot ${idx + 1} (${slotKind})`}
+                onClick={() => onSlotClick(slotKind, idx)}
+                className={`flex h-7 w-7 items-center justify-center rounded-lg border transition hover:scale-110 active:scale-95 ${
+                  isTarget
+                    ? 'border-2 border-dashed border-[#f59e0b] bg-[#fffbeb] hover:bg-[#fef3c7]'
+                    : 'border-[#cbd5e1] bg-[#f8fafc] hover:border-[#94a3b8]'
+                }`}
+              >
+                {cellContent}
+              </button>
+            );
+          }
+
+          return (
+            <div
+              key={idx}
+              className={`flex h-7 w-7 items-center justify-center rounded-lg border transition ${
+                isTarget
+                  ? 'border-2 border-dashed border-[#f59e0b] bg-[#fffbeb]'
+                  : 'border-[#cbd5e1] bg-[#f8fafc]'
+              }`}
+            >
+              {cellContent}
+            </div>
+          );
+        })}
+      </div>
+      {interactiveHint && (
+        <div className="mt-1 text-[10px] font-bold text-[#64748b]">{interactiveHint}</div>
+      )}
+    </div>
   );
 };
 
-const VisualGroupsView: React.FC<{
+const FriendlyTenBadges: React.FC<{ count: number; tone?: 'blue' | 'amber' | 'green' }> = ({
+  count,
+  tone = 'blue',
+}) => {
+  if (count <= 0) return null;
+  const shown = Math.min(count, 10);
+  const toneClass =
+    tone === 'green'
+      ? 'border-[#16a34a] bg-[#dcfce7] text-[#166534]'
+      : tone === 'amber'
+        ? 'border-[#d97706] bg-[#fef3c7] text-[#92400e]'
+        : 'border-[#0284c7] bg-[#e0f2fe] text-[#0c4a6e]';
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {Array.from({ length: shown }).map((_, idx) => (
+        <span
+          key={idx}
+          className={`inline-flex h-7 items-center rounded-lg border-2 px-2 font-display text-xs font-extrabold tabular-nums ${toneClass}`}
+        >
+          10
+        </span>
+      ))}
+      {count > shown && (
+        <span className="text-xs font-extrabold text-[#475569]">
+          (+{count - shown} tens = {count * 10})
+        </span>
+      )}
+    </div>
+  );
+};
+
+const MakeTenView: React.FC<{
   problem: MathProblem;
   onSubmitAnswer?: (val: number) => void;
 }> = ({ problem, onSubmitAnswer }) => {
-  const { a, b, operation } = problem;
+  const plan = useMemo(() => buildMakeTenPlan(problem), [problem]);
+  // Granular interactive progress states
+  const [movedCount, setMovedCount] = useState(0);
+  const [subPhase1Taken, setSubPhase1Taken] = useState(0);
+  const [subPhase2Taken, setSubPhase2Taken] = useState(0);
+  const [revealCardA, setRevealCardA] = useState(false);
+  const [revealCardB, setRevealCardB] = useState(false);
+  const [groupCount, setGroupCount] = useState(1);
 
-  // Multiplication: Interactive Nests of Hatched Chicks
-  const [builtNests, setBuiltNests] = useState(() => (a === 0 ? 0 : 1));
-  // Division: Interactive Egg Basket -> Hatched Chicks in Nests
-  const [dealtCount, setDealtCount] = useState(0);
-  // Addition: Interactive Eggs (Group A) + Hatched Chicks (Group B)
-  const [addUnitsA, setAddUnitsA] = useState<EggUnit[]>(() => buildEggUnits(a, 'addA', 24));
-  const [addUnitsB, setAddUnitsB] = useState<EggUnit[]>(() => buildEggUnits(b, 'addB', 24));
-  // Subtraction: Interactive Whole Eggs that hatch into Chicks when taken away
-  const [subUnits, setSubUnits] = useState<EggUnit[]>(() => buildEggUnits(a, 'sub', 30));
+  const resetAll = () => {
+    setMovedCount(0);
+    setSubPhase1Taken(0);
+    setSubPhase2Taken(0);
+    setRevealCardA(false);
+    setRevealCardB(false);
+    setGroupCount(problem.a === 0 ? 0 : 1);
+  };
 
   useEffect(() => {
-    setBuiltNests(a === 0 ? 0 : 1);
-    setDealtCount(0);
-    setAddUnitsA(buildEggUnits(a, 'addA', 24));
-    setAddUnitsB(buildEggUnits(b, 'addB', 24));
-    setSubUnits(buildEggUnits(a, 'sub', 30));
-  }, [problem.id, a, b]);
+    resetAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problem.id, problem.a]);
 
-  if (operation === 'mul') {
-    const shownTotal = builtNests * b;
-    const perNestShown = Math.min(b, 12);
-    return (
-      <div data-testid="interactive-visual-mul">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
-            Cozy Nests ({builtNests} / {a} nests × {b} chicks)
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              data-testid="visual-add-row-btn"
-              disabled={builtNests >= a}
-              onClick={() => setBuiltNests((r) => Math.min(a, r + 1))}
-              className="rounded-lg border border-[#0369a1] bg-[#e0f2fe] px-2.5 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd] disabled:opacity-50"
-            >
-              + Add Nest ({b})
-            </button>
-            <button
-              type="button"
-              onClick={() => setBuiltNests(a)}
-              className="rounded-lg border border-[#d6be9b] bg-[#fcf7ec] px-2 py-0.5 text-xs font-extrabold text-[#78532a] hover:bg-[#fef3c7]"
-            >
-              Show All
-            </button>
-            <button
-              type="button"
-              onClick={() => setBuiltNests(a === 0 ? 0 : 1)}
-              className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a] hover:bg-[#fef3c7]"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-        <div className="space-y-1.5 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
-          {builtNests === 0 ? (
-            <div className="py-3 text-center text-xs font-bold text-[#64748b]">
-              0 nests means 0 hatched chicks!
-            </div>
-          ) : (
-            <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
-              {Array.from({ length: builtNests }).map((_, r) => (
-                <div
-                  key={r}
-                  className="flex items-center gap-2 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-2.5 py-1.5"
-                >
-                  <span className="w-12 shrink-0 text-[10px] font-extrabold text-[#92400e] tabular-nums">
-                    Nest #{r + 1}
-                  </span>
-                  <div className="flex flex-wrap items-center gap-0.5">
-                    {Array.from({ length: perNestShown }).map((__, c) => (
-                      <HatchedChickSvg key={c} size={22} />
-                    ))}
-                    {b > perNestShown && (
-                      <span className="ml-1 text-[11px] font-bold text-[#92400e]">
-                        +{b - perNestShown} more
-                      </span>
-                    )}
-                  </div>
-                  <span className="ml-auto shrink-0 text-[11px] font-extrabold text-[#0369a1] tabular-nums">
-                    = {(r + 1) * b}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="mt-2 flex items-center justify-between border-t border-[#e2e8f0] pt-2 text-xs font-extrabold text-[#475569]">
-            <span>Running Total: {shownTotal} hatched chicks</span>
-            {onSubmitAnswer && builtNests === a && (
-              <button
-                type="button"
-                data-testid="visual-submit-btn"
-                onClick={() => onSubmitAnswer(shownTotal)}
-                className="rounded-lg border border-[#15803d] bg-[#22c55e] px-2.5 py-0.5 text-xs font-bold text-white"
-              >
-                Submit {shownTotal} ★
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (operation === 'div') {
-    const nestCount = Math.max(1, b);
-    const chicksPerNest = Math.floor(dealtCount / nestCount);
-    const eggsLeft = Math.max(0, a - dealtCount);
-    return (
-      <div data-testid="interactive-visual-div">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
-            Share {a} Eggs into {b} Equal Nests
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              data-testid="visual-deal-round-btn"
-              disabled={dealtCount >= a}
-              onClick={() => setDealtCount((d) => Math.min(a, d + nestCount))}
-              className="rounded-lg border border-[#0369a1] bg-[#e0f2fe] px-2.5 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd] disabled:opacity-50"
-            >
-              Hatch 1 in Each Nest (+{nestCount})
-            </button>
-            <button
-              type="button"
-              disabled={dealtCount >= a}
-              onClick={() => setDealtCount(a)}
-              className="rounded-lg border border-[#d6be9b] bg-[#fcf7ec] px-2 py-0.5 text-xs font-extrabold text-[#78532a] hover:bg-[#fef3c7] disabled:opacity-50"
-            >
-              Hatch All
-            </button>
-            <button
-              type="button"
-              onClick={() => setDealtCount(0)}
-              className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-        <div className="space-y-2 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
-          <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-[#64748b] tabular-nums">
-            <WholeEggSvg size={16} />
-            <span>
-              Whole Eggs Left in Basket: {eggsLeft} of {a}
+  // 1. ADDITION: Make a 10 (or reach Friendly 10)
+  if (problem.operation === 'add') {
+    if (plan.mode === 'add-already-ten') {
+      const targetClicks = Math.max(1, plan.otherDots);
+      const combined = movedCount >= targetClicks;
+      return (
+        <div data-testid="interactive-make10-add">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+              Friendly Ten Already Ready ({plan.anchor} + {plan.other})
             </span>
-          </div>
-          <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
-            {Array.from({ length: nestCount }).map((_, idx) => {
-              const countInThis =
-                Math.floor(dealtCount / nestCount) + (idx < dealtCount % nestCount ? 1 : 0);
-              return (
-                <div
-                  key={idx}
-                  className="rounded-xl border-2 border-[#d97706] bg-[#fffbeb] p-2"
-                >
-                  <div className="mb-1 flex items-center justify-between text-[11px] font-extrabold text-[#92400e]">
-                    <span>Nest {idx + 1}</span>
-                    <span className="tabular-nums">{countInThis}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-0.5">
-                    {countInThis === 0 ? (
-                      <span className="text-[10px] font-bold text-[#a16207]">Empty nest</span>
-                    ) : (
-                      Array.from({ length: countInThis }).map((__, sIdx) => (
-                        <HatchedChickSvg key={sIdx} size={20} />
-                      ))
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {onSubmitAnswer && dealtCount === a && (
-            <div className="flex items-center justify-between border-t border-[#e2e8f0] pt-2">
-              <span className="text-xs font-extrabold text-[#15803d]">
-                Each nest has {chicksPerNest} hatched chicks!
-              </span>
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                data-testid="visual-submit-btn"
-                onClick={() => onSubmitAnswer(chicksPerNest)}
-                className="rounded-lg border border-[#15803d] bg-[#22c55e] px-2.5 py-0.5 text-xs font-bold text-white"
+                data-testid="make10-action-btn"
+                disabled={combined}
+                onClick={() => setMovedCount(targetClicks)}
+                className="rounded-lg border border-[#15803d] bg-[#dcfce7] px-2.5 py-0.5 text-xs font-extrabold text-[#166534] hover:bg-[#bbf7d0] disabled:opacity-50"
               >
-                Submit {chicksPerNest} ★
+                Combine {plan.anchor} + {plan.other}
+              </button>
+              <button
+                type="button"
+                onClick={resetAll}
+                className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+              >
+                Reset
               </button>
             </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+          </div>
 
-  if (operation === 'sub') {
-    const hatchedTotal = sumEggUnits(subUnits, true);
-    const remainingTotal = sumEggUnits(subUnits, false);
-    const hasContainerToBreak = subUnits.some((u) => !u.hatched && u.value > 1);
-    return (
-      <div data-testid="interactive-visual-sub">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
-            Tap Whole Eggs to Hatch &amp; Take Away ({a} − {b})
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {hasContainerToBreak && (
-              <button
-                type="button"
-                data-testid="visual-break-egg-btn"
-                onClick={() => setSubUnits((prev) => breakEggContainer(prev))}
-                className="rounded-lg border border-[#0284c7] bg-[#e0f2fe] px-2 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd]"
-              >
-                Unpack 10-Tray
-              </button>
-            )}
-            <button
-              type="button"
-              data-testid="visual-hatch-b-btn"
-              onClick={() => setSubUnits(hatchExactEggs(buildEggUnits(a, 'sub', 30), b))}
-              className="rounded-lg border border-[#ea580c] bg-[#ffedd5] px-2 py-0.5 text-xs font-extrabold text-[#9a3412] hover:bg-[#fed7aa]"
-            >
-              Hatch {b} Away
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubUnits(buildEggUnits(a, 'sub', 30))}
-              className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
-            >
-              Reset
-            </button>
+          <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-xl border-2 border-[#bae6fd] bg-[#f0f9ff] p-2.5">
+                <div className="mb-1 text-[11px] font-extrabold text-[#0c4a6e]">
+                  Friendly Ten: {plan.anchor}
+                </div>
+                <FriendlyTenBadges count={Math.floor(plan.anchor / 10)} tone="blue" />
+              </div>
+              <span className="font-display text-xl font-black text-[#64748b]">+</span>
+              <div className="rounded-xl border-2 border-[#fed7aa] bg-[#fff7ed] p-2.5">
+                <div className="mb-1 text-[11px] font-extrabold text-[#9a3412]">
+                  Tap dots to count on ({movedCount}/{plan.otherDots || 0}):
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <FriendlyTenBadges count={plan.otherBadges} tone="amber" />
+                  {plan.otherDots > 0 && (
+                    <TenFrameGrid
+                      primaryCount={0}
+                      addedCount={Math.min(movedCount, plan.otherDots)}
+                      targetNeeded={Math.max(0, plan.otherDots - movedCount)}
+                      onSlotClick={(kind) => {
+                        if (kind === 'target') {
+                          setMovedCount((c) => Math.min(targetClicks, c + 1));
+                        } else if (kind === 'added') {
+                          setMovedCount((c) => Math.max(0, c - 1));
+                        }
+                      }}
+                      interactiveHint="Tap a pulsing dot to count on!"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2">
+              <span className="font-display text-sm font-extrabold text-[#166534] tabular-nums">
+                {combined
+                  ? `${plan.anchor} + ${plan.other} = ${plan.answer}`
+                  : `${plan.anchor} + ${plan.otherBadges * 10 + Math.min(movedCount, plan.otherDots)} = ${plan.anchor + plan.otherBadges * 10 + Math.min(movedCount, plan.otherDots)} (keep counting!)`}
+              </span>
+              {onSubmitAnswer && combined && (
+                <button
+                  type="button"
+                  data-testid="make10-submit-btn"
+                  onClick={() => onSubmitAnswer(plan.answer)}
+                  className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+                >
+                  Submit {plan.answer} ★
+                </button>
+              )}
+            </div>
           </div>
         </div>
-        <div className="rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
-          <div className="mb-1.5 text-[11px] font-bold text-[#64748b]">
-            Whole Eggs = still here · Hatched Chicks = taken away
-          </div>
-          <div className="flex max-h-48 flex-wrap items-center gap-1.5 overflow-y-auto pr-1">
-            {subUnits.map((unit) => (
+      );
+    }
+
+    if (plan.mode === 'add-under-ten') {
+      const filled = movedCount >= plan.other;
+      const currentSum = plan.anchor + movedCount;
+      const remainingToPut = Math.max(0, plan.other - movedCount);
+      return (
+        <div data-testid="interactive-make10-add">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+              Fill the Ten-Frame ({plan.anchor} + {plan.other})
+            </span>
+            <div className="flex items-center gap-1.5">
               <button
-                key={unit.id}
                 type="button"
-                title={
-                  unit.hatched
-                    ? `Hatched (${unit.value}) — click to restore whole egg`
-                    : `Whole (${unit.value}) — click to hatch & take away`
+                data-testid="make10-action-btn"
+                disabled={filled}
+                onClick={() => setMovedCount(plan.other)}
+                className="rounded-lg border border-[#0369a1] bg-[#e0f2fe] px-2.5 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd] disabled:opacity-50"
+              >
+                {movedCount === 0
+                  ? `Put ${plan.other} in Ten-Frame`
+                  : `Put ${remainingToPut} More`}
+              </button>
+              <button
+                type="button"
+                onClick={resetAll}
+                className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {plan.anchorTens > 0 && (
+                <div className="rounded-xl border-2 border-[#bae6fd] bg-[#f0f9ff] p-2">
+                  <div className="mb-1 text-[10px] font-extrabold text-[#0c4a6e]">
+                    {plan.anchorTens} Tens
+                  </div>
+                  <FriendlyTenBadges count={plan.anchorTens / 10} tone="blue" />
+                </div>
+              )}
+              <TenFrameGrid
+                primaryCount={plan.anchorOnes}
+                addedCount={movedCount}
+                targetNeeded={remainingToPut}
+                label={filled ? 'Filled Together' : `Start (${plan.anchorOnes} + ${movedCount})`}
+                interactiveHint={
+                  filled
+                    ? 'Tap an orange dot to take 1 back out'
+                    : 'Tap a dashed slot or orange dot to add +1!'
                 }
-                onClick={() =>
-                  setSubUnits((prev) =>
-                    prev.map((u) => (u.id === unit.id ? { ...u, hatched: !u.hatched } : u))
-                  )
-                }
-                className={`inline-flex items-center justify-center rounded-xl border p-1 transition ${
-                  unit.hatched
-                    ? 'border-[#fca5a5] bg-[#fef2f2]'
-                    : 'border-[#fde68a] bg-[#fffbeb] hover:scale-105'
+                onSlotClick={(kind) => {
+                  if (kind === 'target') {
+                    setMovedCount((c) => Math.min(plan.other, c + 1));
+                  } else if (kind === 'added') {
+                    setMovedCount((c) => Math.max(0, c - 1));
+                  }
+                }}
+              />
+              {!filled && (
+                <div className="rounded-xl border-2 border-[#fed7aa] bg-[#fff7ed] p-2.5">
+                  <div className="mb-1 text-[11px] font-extrabold text-[#9a3412]">
+                    Tap to Move ({remainingToPut} left):
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Array.from({ length: remainingToPut }).map((_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        aria-label={`Add 1 dot to Ten-Frame (${remainingToPut} left)`}
+                        onClick={() => setMovedCount((c) => Math.min(plan.other, c + 1))}
+                        className="h-6 w-6 rounded-full border-2 border-[#c2410c] bg-[#f97316] shadow-xs transition hover:scale-115 active:scale-95"
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2">
+              <span
+                className={`font-display text-sm font-extrabold tabular-nums ${
+                  filled ? 'text-[#166534]' : 'text-[#475569]'
                 }`}
               >
-                {unit.value > 1 ? (
-                  <EggContainerBadge value={unit.value} hatched={unit.hatched} kind="egg" />
-                ) : unit.hatched ? (
-                  <HatchedChickSvg size={24} crossed />
-                ) : (
-                  <WholeEggSvg size={22} />
-                )}
-              </button>
-            ))}
+                {filled
+                  ? `${plan.anchor} + ${plan.other} = ${plan.answer} (${plan.shortBy} spaces away from ${plan.friendlyTarget})`
+                  : `${plan.anchor} + ${movedCount} = ${currentSum} (${remainingToPut} more to add)`}
+              </span>
+              {onSubmitAnswer && filled && (
+                <button
+                  type="button"
+                  data-testid="make10-submit-btn"
+                  onClick={() => onSubmitAnswer(plan.answer)}
+                  className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+                >
+                  Submit {plan.answer} ★
+                </button>
+              )}
+            </div>
           </div>
-          <div className="mt-2 flex items-center justify-between border-t border-[#e2e8f0] pt-2 text-xs font-extrabold text-[#475569] tabular-nums">
-            <span>
-              Hatched Away: {hatchedTotal} · Whole Eggs Left: {remainingTotal}
+        </div>
+      );
+    }
+
+    // Classic Make a 10 (add-make-ten) — step dot-by-dot OR click Move button
+    const remainingToMove = Math.max(0, plan.neededToTen - movedCount);
+    const madeTen = remainingToMove === 0;
+    const baseTenCount = plan.anchorTens / 10;
+    const liveAnchorVal = plan.anchor + movedCount;
+    const liveOtherVal = plan.other - movedCount;
+    const liveDotsInTray2 = Math.max(0, plan.otherDots - movedCount);
+    const leftoverTens = Math.floor(plan.leftover / 10);
+    const leftoverOnes = plan.leftover % 10;
+
+    return (
+      <div data-testid="interactive-make10-add">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+            Make a Friendly {plan.friendlyTarget} ({plan.anchor} + {plan.other})
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="make10-action-btn"
+              disabled={madeTen}
+              onClick={() => setMovedCount(plan.neededToTen)}
+              className="rounded-lg border border-[#b45309] bg-[#fef3c7] px-2.5 py-0.5 text-xs font-extrabold text-[#92400e] hover:bg-[#fde68a] disabled:opacity-50"
+            >
+              {movedCount === 0
+                ? `Move ${plan.neededToTen} to Make ${plan.friendlyTarget}!`
+                : `Move ${remainingToMove} More!`}
+            </button>
+            <button
+              type="button"
+              onClick={resetAll}
+              className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+          {/* Interactive Number Bond Split Callout */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-xs font-extrabold text-[#78350f]">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span>Split {plan.other}:</span>
+              <span className="rounded-lg border border-[#f59e0b] bg-white px-2 py-0.5 text-[#b45309] tabular-nums">
+                {plan.neededToTen} (fills 10)
+              </span>
+              <span>+</span>
+              <span className="rounded-lg border border-[#cbd5e1] bg-white px-2 py-0.5 text-[#334155] tabular-nums">
+                {plan.leftover} (leftover)
+              </span>
+            </div>
+            <span className="rounded-lg bg-white px-2 py-0.5 text-[11px] font-black text-[#b45309] tabular-nums">
+              Moved: {movedCount} / {plan.neededToTen}
             </span>
-            {onSubmitAnswer && remainingTotal === problem.answer && (
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            {/* Tray 1: Anchor Ten-Frame */}
+            <div
+              className={`rounded-xl border-2 p-2.5 transition ${
+                madeTen
+                  ? 'border-[#16a34a] bg-[#f0fdf4]'
+                  : 'border-[#93c5fd] bg-[#eff6ff]'
+              }`}
+            >
+              <div className="mb-1.5 flex items-center justify-between text-xs font-extrabold">
+                <span className={madeTen ? 'text-[#166534]' : 'text-[#1e40af]'}>
+                  {madeTen
+                    ? `Friendly ${plan.friendlyTarget}!`
+                    : `Start: ${liveAnchorVal} (Needs ${remainingToMove} more)`}
+                </span>
+                <span className="rounded-md bg-white px-1.5 py-0.5 text-[11px] font-black text-[#0f172a] tabular-nums">
+                  {liveAnchorVal}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <FriendlyTenBadges
+                  count={baseTenCount}
+                  tone={madeTen ? 'green' : 'blue'}
+                />
+                <TenFrameGrid
+                  primaryCount={plan.anchorOnes}
+                  addedCount={movedCount}
+                  targetNeeded={remainingToMove}
+                  completeHighlight={madeTen}
+                  label={
+                    madeTen
+                      ? 'Full 10!'
+                      : `${plan.anchorOnes + movedCount} + ${remainingToMove} = 10`
+                  }
+                  interactiveHint={
+                    madeTen
+                      ? 'Tap an orange dot to move 1 back'
+                      : 'Tap a dashed slot to pull 1 dot here!'
+                  }
+                  onSlotClick={(kind) => {
+                    if (kind === 'target') {
+                      setMovedCount((c) => Math.min(plan.neededToTen, c + 1));
+                    } else if (kind === 'added') {
+                      setMovedCount((c) => Math.max(0, c - 1));
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Tray 2: Second Addend / Leftover */}
+            <div className="rounded-xl border-2 border-[#fdba74] bg-[#fff7ed] p-2.5">
+              <div className="mb-1.5 flex items-center justify-between text-xs font-extrabold text-[#9a3412]">
+                <span>
+                  {madeTen ? `Leftover: ${plan.leftover}` : `Tap dots to move (${liveOtherVal} here)`}
+                </span>
+                <span className="rounded-md bg-white px-1.5 py-0.5 text-[11px] font-black text-[#9a3412] tabular-nums">
+                  {liveOtherVal}
+                </span>
+              </div>
+
+              {!madeTen ? (
+                <div className="space-y-2">
+                  <FriendlyTenBadges count={plan.otherBadges} tone="amber" />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {Array.from({ length: liveDotsInTray2 }).map((_, idx) => {
+                      const willMove = idx < remainingToMove;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          data-testid={`make10-tray-dot-${idx}`}
+                          aria-label={
+                            willMove
+                              ? `Move 1 orange dot to make ${plan.friendlyTarget}`
+                              : 'Leftover dot'
+                          }
+                          onClick={() =>
+                            setMovedCount((c) => Math.min(plan.neededToTen, c + 1))
+                          }
+                          className={`h-6 w-6 rounded-full border-2 transition hover:scale-115 active:scale-95 ${
+                            willMove
+                              ? 'border-[#b45309] bg-[#f97316] ring-2 ring-[#fde68a]'
+                              : 'border-[#cbd5e1] bg-[#fdba74]'
+                          }`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="text-[11px] font-bold text-[#9a3412]">
+                    Tap any dot to move 1 into the Ten-Frame ({remainingToMove} needed to make{' '}
+                    {plan.friendlyTarget})!
+                  </div>
+                </div>
+              ) : plan.leftover === 0 ? (
+                <div className="py-3 text-center text-xs font-extrabold text-[#166534]">
+                  All {plan.other} moved to make {plan.friendlyTarget}! (0 left over)
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <FriendlyTenBadges count={leftoverTens} tone="amber" />
+                  {leftoverOnes > 0 && (
+                    <TenFrameGrid
+                      primaryCount={0}
+                      addedCount={leftoverOnes}
+                      label="Leftover Ones"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Interactive Result Equation Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2">
+            {!madeTen ? (
+              <span className="text-xs font-extrabold text-[#475569] tabular-nums">
+                {liveAnchorVal} + {liveOtherVal} = ? (Move {remainingToMove} more to reach{' '}
+                {plan.friendlyTarget})
+              </span>
+            ) : (
+              <>
+                <span
+                  data-testid="make10-result-equation"
+                  className="font-display text-sm font-extrabold text-[#15803d] tabular-nums"
+                >
+                  {plan.friendlyTarget} + {plan.leftover} = {plan.answer}
+                </span>
+                {onSubmitAnswer && (
+                  <button
+                    type="button"
+                    data-testid="make10-submit-btn"
+                    onClick={() => onSubmitAnswer(plan.answer)}
+                    className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+                  >
+                    Submit {plan.answer} ★
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. SUBTRACTION: Bridge Down to Friendly 10
+  if (problem.operation === 'sub') {
+    if (plan.mode === 'sub-bridge-ten') {
+      const doneStep1 = subPhase1Taken >= plan.bridgeTake;
+      const phase2FrameTarget = plan.bridgeRemainder % 10 === 0 ? 10 : plan.bridgeRemainder % 10;
+      const doneStep2 = doneStep1 && subPhase2Taken >= phase2FrameTarget;
+      const targetTensAfterStep1 = Math.floor(plan.friendlyTarget / 10);
+      const remAfterStep2 = plan.friendlyTarget - plan.bridgeRemainder;
+      const remTens = Math.floor(remAfterStep2 / 10);
+      const remOnes = remAfterStep2 % 10;
+
+      return (
+        <div data-testid="interactive-make10-sub">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+              Subtract Down to Friendly {plan.friendlyTarget} ({plan.a} − {plan.b})
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {!doneStep1 ? (
+                <button
+                  type="button"
+                  data-testid="make10-action-btn"
+                  onClick={() => setSubPhase1Taken(plan.bridgeTake)}
+                  className="rounded-lg border border-[#b45309] bg-[#fef3c7] px-2.5 py-0.5 text-xs font-extrabold text-[#92400e] hover:bg-[#fde68a]"
+                >
+                  Step 1: Take {plan.bridgeTake - subPhase1Taken} → {plan.friendlyTarget}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="make10-action-btn"
+                  disabled={doneStep2}
+                  onClick={() => setSubPhase2Taken(phase2FrameTarget)}
+                  className="rounded-lg border border-[#dc2626] bg-[#fee2e2] px-2.5 py-0.5 text-xs font-extrabold text-[#b91c1c] hover:bg-[#fecaca] disabled:opacity-50"
+                >
+                  Step 2: Take {plan.bridgeRemainder - subPhase2Taken} More
+                </button>
+              )}
               <button
                 type="button"
-                data-testid="visual-submit-btn"
-                onClick={() => onSubmitAnswer(remainingTotal)}
-                className="rounded-lg border border-[#15803d] bg-[#22c55e] px-2.5 py-0.5 text-xs font-bold text-white"
+                onClick={resetAll}
+                className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
               >
-                Submit {remainingTotal} ★
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-xs font-extrabold text-[#78350f]">
+              <span>Split {plan.b}:</span>
+              <span className="rounded-lg border border-[#f59e0b] bg-white px-2 py-0.5 text-[#b45309] tabular-nums">
+                {plan.bridgeTake} (down to {plan.friendlyTarget})
+              </span>
+              <span>+</span>
+              <span className="rounded-lg border border-[#fca5a5] bg-white px-2 py-0.5 text-[#b91c1c] tabular-nums">
+                {plan.bridgeRemainder} (from {plan.friendlyTarget})
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {!doneStep1 ? (
+                <>
+                  <div className="rounded-xl border-2 border-[#bae6fd] bg-[#f0f9ff] p-2.5">
+                    <div className="mb-1 text-[11px] font-extrabold text-[#0c4a6e]">
+                      {plan.anchorTens} Tens
+                    </div>
+                    <FriendlyTenBadges count={targetTensAfterStep1} tone="blue" />
+                  </div>
+                  <TenFrameGrid
+                    primaryCount={plan.anchorOnes}
+                    crossedFromEnd={subPhase1Taken}
+                    crossedColor="amber"
+                    label={`Ones (${plan.anchorOnes - subPhase1Taken} left)`}
+                    interactiveHint={`Tap dots to take ${plan.bridgeTake} away → ${plan.friendlyTarget}!`}
+                    onSlotClick={(kind) => {
+                      if (kind === 'primary') {
+                        setSubPhase1Taken((c) => Math.min(plan.bridgeTake, c + 1));
+                      } else if (kind === 'crossed') {
+                        setSubPhase1Taken((c) => Math.max(0, c - 1));
+                      }
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  {remTens > 0 && (
+                    <div className="rounded-xl border-2 border-[#bae6fd] bg-[#f0f9ff] p-2.5">
+                      <div className="mb-1 text-[11px] font-extrabold text-[#0c4a6e]">
+                        {doneStep2 ? 'Remaining Tens' : `Friendly ${plan.friendlyTarget}`}
+                      </div>
+                      <FriendlyTenBadges
+                        count={doneStep2 ? remTens : Math.max(0, targetTensAfterStep1 - 1)}
+                        tone="green"
+                      />
+                    </div>
+                  )}
+                  <TenFrameGrid
+                    primaryCount={10}
+                    crossedFromEnd={subPhase2Taken}
+                    crossedColor="red"
+                    completeHighlight={doneStep2}
+                    label={`10 − ${subPhase2Taken} = ${10 - subPhase2Taken}`}
+                    interactiveHint={
+                      doneStep2
+                        ? `Reached ${remOnes} ones! Tap × to undo`
+                        : `Tap ${phase2FrameTarget - subPhase2Taken} more dots to cross out!`
+                    }
+                    onSlotClick={(kind) => {
+                      if (kind === 'primary') {
+                        setSubPhase2Taken((c) => Math.min(phase2FrameTarget, c + 1));
+                      } else if (kind === 'crossed') {
+                        setSubPhase2Taken((c) => Math.max(0, c - 1));
+                      }
+                    }}
+                  />
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2">
+              {!doneStep1 ? (
+                <span className="text-xs font-extrabold text-[#475569] tabular-nums">
+                  {plan.a - subPhase1Taken} now (take {plan.bridgeTake - subPhase1Taken} more to
+                  land on {plan.friendlyTarget})
+                </span>
+              ) : !doneStep2 ? (
+                <span className="text-xs font-extrabold text-[#b45309] tabular-nums">
+                  At Friendly {plan.friendlyTarget}! Cross out {phase2FrameTarget - subPhase2Taken}{' '}
+                  more dot{phase2FrameTarget - subPhase2Taken === 1 ? '' : 's'}
+                </span>
+              ) : (
+                <>
+                  <span
+                    data-testid="make10-result-equation"
+                    className="font-display text-sm font-extrabold text-[#15803d] tabular-nums"
+                  >
+                    {plan.friendlyTarget} − {plan.bridgeRemainder} = {plan.answer}
+                  </span>
+                  {onSubmitAnswer && (
+                    <button
+                      type="button"
+                      data-testid="make10-submit-btn"
+                      onClick={() => onSubmitAnswer(plan.answer)}
+                      className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+                    >
+                      Submit {plan.answer} ★
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // sub-from-ten or sub-simple — tap dots to cross out 1-by-1!
+    const isFromTen = plan.mode === 'sub-from-ten';
+    const remTens = Math.floor(plan.answer / 10);
+    const framePrimary = isFromTen ? 10 : plan.anchorOnes;
+    const frameCrossedTarget = isFromTen
+      ? Math.min(10, plan.b % 10 === 0 && plan.b > 0 ? 10 : plan.b)
+      : plan.b;
+    const done = subPhase1Taken >= frameCrossedTarget;
+
+    return (
+      <div data-testid="interactive-make10-sub">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+            Ten-Frame Take Away ({plan.a} − {plan.b})
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="make10-action-btn"
+              disabled={done}
+              onClick={() => setSubPhase1Taken(frameCrossedTarget)}
+              className="rounded-lg border border-[#dc2626] bg-[#fee2e2] px-2.5 py-0.5 text-xs font-extrabold text-[#b91c1c] hover:bg-[#fecaca] disabled:opacity-50"
+            >
+              Take {frameCrossedTarget - subPhase1Taken} Away
+            </button>
+            <button
+              type="button"
+              onClick={resetAll}
+              className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {(isFromTen ? (done ? remTens : plan.anchorTens / 10 - 1) : plan.anchorTens / 10) > 0 && (
+              <div className="rounded-xl border-2 border-[#bae6fd] bg-[#f0f9ff] p-2.5">
+                <div className="mb-1 text-[11px] font-extrabold text-[#0c4a6e]">Tens</div>
+                <FriendlyTenBadges
+                  count={
+                    isFromTen
+                      ? done
+                        ? remTens
+                        : Math.max(0, plan.anchorTens / 10 - 1)
+                      : plan.anchorTens / 10
+                  }
+                  tone="blue"
+                />
+              </div>
+            )}
+            <TenFrameGrid
+              primaryCount={framePrimary}
+              crossedFromEnd={subPhase1Taken}
+              crossedColor="red"
+              completeHighlight={done}
+              label={`${framePrimary} − ${subPhase1Taken} = ${framePrimary - subPhase1Taken}`}
+              interactiveHint={
+                done
+                  ? 'All crossed out! Tap × to restore 1'
+                  : `Tap ${frameCrossedTarget - subPhase1Taken} dot${frameCrossedTarget - subPhase1Taken === 1 ? '' : 's'} to cross out!`
+              }
+              onSlotClick={(kind) => {
+                if (kind === 'primary') {
+                  setSubPhase1Taken((c) => Math.min(frameCrossedTarget, c + 1));
+                } else if (kind === 'crossed') {
+                  setSubPhase1Taken((c) => Math.max(0, c - 1));
+                }
+              }}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2">
+            <span
+              data-testid="make10-result-equation"
+              className={`font-display text-sm font-extrabold tabular-nums ${
+                done ? 'text-[#166534]' : 'text-[#475569]'
+              }`}
+            >
+              {done
+                ? `${plan.a} − ${plan.b} = ${plan.answer}`
+                : `${plan.a} − ${subPhase1Taken} = ${plan.a - subPhase1Taken} (take ${frameCrossedTarget - subPhase1Taken} more)`}
+            </span>
+            {onSubmitAnswer && done && (
+              <button
+                type="button"
+                data-testid="make10-submit-btn"
+                onClick={() => onSubmitAnswer(plan.answer)}
+                className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+              >
+                Submit {plan.answer} ★
               </button>
             )}
           </div>
@@ -1986,125 +2445,379 @@ const VisualGroupsView: React.FC<{
     );
   }
 
-  // Addition: Group A (Whole Eggs) + Group B (Hatched Chicks) — exact for all numbers!
-  const countedA = sumEggUnits(addUnitsA, true);
-  const countedB = sumEggUnits(addUnitsB, true);
-  const totalCounted = countedA + countedB;
+  // 3. MULTIPLICATION: Break Apart by 10s or Fill Ten-Frames
+  if (problem.operation === 'mul') {
+    if (plan.mode === 'mul-ten-split') {
+      const done = revealCardA && revealCardB;
+      return (
+        <div data-testid="interactive-make10-mul">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+              Friendly 10s Split ({plan.a} × {plan.b})
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="make10-action-btn"
+                disabled={done}
+                onClick={() => {
+                  setRevealCardA(true);
+                  setRevealCardB(true);
+                }}
+                className="rounded-lg border border-[#0369a1] bg-[#e0f2fe] px-2.5 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd] disabled:opacity-50"
+              >
+                Solve Both Parts
+              </button>
+              <button
+                type="button"
+                onClick={resetAll}
+                className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setRevealCardA((v) => !v)}
+                className={`rounded-xl border-2 p-3 text-left transition hover:scale-[1.02] ${
+                  revealCardA
+                    ? 'border-[#0284c7] bg-[#e0f2fe]'
+                    : 'border-[#bae6fd] bg-[#f0f9ff]'
+                }`}
+              >
+                <div className="text-xs font-extrabold text-[#0c4a6e]">
+                  Friendly Tens Part (tap to reveal)
+                </div>
+                <div className="mt-1 font-display text-lg font-black text-[#0369a1] tabular-nums">
+                  {plan.anchorTens} × {plan.other} = {revealCardA ? plan.friendlyTarget : '?'}
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRevealCardB((v) => !v)}
+                className={`rounded-xl border-2 p-3 text-left transition hover:scale-[1.02] ${
+                  revealCardB
+                    ? 'border-[#ea580c] bg-[#ffedd5]'
+                    : 'border-[#fed7aa] bg-[#fff7ed]'
+                }`}
+              >
+                <div className="text-xs font-extrabold text-[#9a3412]">
+                  Ones Part (tap to reveal)
+                </div>
+                <div className="mt-1 font-display text-lg font-black text-[#c2410c] tabular-nums">
+                  {plan.anchorOnes} × {plan.other} = {revealCardB ? plan.leftover : '?'}
+                </div>
+              </button>
+            </div>
+
+            {done && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-[#16a34a] bg-[#f0fdf4] px-3 py-2">
+                <span
+                  data-testid="make10-result-equation"
+                  className="font-display text-sm font-extrabold text-[#166534] tabular-nums"
+                >
+                  {plan.friendlyTarget} + {plan.leftover} = {plan.answer}
+                </span>
+                {onSubmitAnswer && (
+                  <button
+                    type="button"
+                    data-testid="make10-submit-btn"
+                    onClick={() => onSubmitAnswer(plan.answer)}
+                    className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+                  >
+                    Submit {plan.answer} ★
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const pouredDots = groupCount * plan.b;
+    const fullFrames = Math.floor(pouredDots / 10);
+    const partialDots = pouredDots % 10;
+
+    return (
+      <div data-testid="interactive-make10-mul">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+            Fill Ten-Frames ({groupCount} / {plan.a} groups × {plan.b})
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              disabled={groupCount <= 0}
+              onClick={() => setGroupCount((g) => Math.max(0, g - 1))}
+              className="rounded-lg border border-[#cbd5e1] bg-white px-2 py-0.5 text-xs font-extrabold text-[#475569] disabled:opacity-50"
+            >
+              −1 Group
+            </button>
+            <button
+              type="button"
+              data-testid="make10-action-btn"
+              disabled={groupCount >= plan.a}
+              onClick={() => setGroupCount((g) => Math.min(plan.a, g + 1))}
+              className="rounded-lg border border-[#0369a1] bg-[#e0f2fe] px-2.5 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd] disabled:opacity-50"
+            >
+              +1 Group ({plan.b})
+            </button>
+            <button
+              type="button"
+              onClick={() => setGroupCount(plan.a)}
+              className="rounded-lg border border-[#d6be9b] bg-[#fcf7ec] px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+            >
+              Fill All
+            </button>
+            <button
+              type="button"
+              onClick={resetAll}
+              className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {Array.from({ length: Math.min(fullFrames, 4) }).map((_, i) => (
+              <TenFrameGrid
+                key={i}
+                primaryCount={10}
+                completeHighlight
+                label={`Ten #${i + 1}`}
+              />
+            ))}
+            {fullFrames > 4 && (
+              <FriendlyTenBadges count={fullFrames - 4} tone="green" />
+            )}
+            {(partialDots > 0 || pouredDots === 0) && (
+              <TenFrameGrid
+                primaryCount={partialDots}
+                targetNeeded={10 - partialDots}
+                label="Next 10"
+                onSlotClick={
+                  groupCount < plan.a
+                    ? (kind) => {
+                        if (kind === 'target') {
+                          setGroupCount((g) => Math.min(plan.a, g + 1));
+                        }
+                      }
+                    : undefined
+                }
+              />
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2">
+            <span className="text-xs font-extrabold text-[#475569] tabular-nums">
+              {fullFrames} Friendly 10{fullFrames === 1 ? '' : 's'} + {partialDots} ones ={' '}
+              {pouredDots}
+            </span>
+            {onSubmitAnswer && groupCount === plan.a && (
+              <button
+                type="button"
+                data-testid="make10-submit-btn"
+                onClick={() => onSubmitAnswer(pouredDots)}
+                className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+              >
+                Submit {pouredDots} ★
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 4. DIVISION: Friendly 10-Groups or Count Up in Equal Groups
+  if (plan.mode === 'div-ten-chunk') {
+    const done = revealCardA && revealCardB;
+    return (
+      <div data-testid="interactive-make10-div">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
+            Friendly 10-Group Chunk ({plan.a} ÷ {plan.b})
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="make10-action-btn"
+              disabled={done}
+              onClick={() => {
+                setRevealCardA(true);
+                setRevealCardB(true);
+              }}
+              className="rounded-lg border border-[#0369a1] bg-[#e0f2fe] px-2.5 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd] disabled:opacity-50"
+            >
+              Take 10 Groups ({plan.friendlyTarget})
+            </button>
+            <button
+              type="button"
+              onClick={resetAll}
+              className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setRevealCardA((v) => !v)}
+              className={`rounded-xl border-2 p-3 text-left transition hover:scale-[1.02] ${
+                revealCardA
+                  ? 'border-[#0284c7] bg-[#e0f2fe]'
+                  : 'border-[#bae6fd] bg-[#f0f9ff]'
+              }`}
+            >
+              <div className="text-xs font-extrabold text-[#0c4a6e]">
+                Friendly 10-Chunk (tap)
+              </div>
+              <div className="mt-1 font-display text-lg font-black text-[#0369a1] tabular-nums">
+                10 × {plan.b} = {revealCardA ? plan.friendlyTarget : '?'}
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setRevealCardB((v) => !v)}
+              className={`rounded-xl border-2 p-3 text-left transition hover:scale-[1.02] ${
+                revealCardB
+                  ? 'border-[#ea580c] bg-[#ffedd5]'
+                  : 'border-[#fed7aa] bg-[#fff7ed]'
+              }`}
+            >
+              <div className="text-xs font-extrabold text-[#9a3412]">
+                Remaining Groups (tap)
+              </div>
+              <div className="mt-1 font-display text-lg font-black text-[#c2410c] tabular-nums">
+                {revealCardB
+                  ? `${plan.leftover} ÷ ${plan.b} = ${plan.divRemGroups}`
+                  : `${plan.a} − ${plan.friendlyTarget} = ${plan.leftover}`}
+              </div>
+            </button>
+          </div>
+
+          {done && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-[#16a34a] bg-[#f0fdf4] px-3 py-2">
+              <span
+                data-testid="make10-result-equation"
+                className="font-display text-sm font-extrabold text-[#166534] tabular-nums"
+              >
+                10 + {plan.divRemGroups} = {plan.answer} groups
+              </span>
+              {onSubmitAnswer && (
+                <button
+                  type="button"
+                  data-testid="make10-submit-btn"
+                  onClick={() => onSubmitAnswer(plan.answer)}
+                  className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
+                >
+                  Submit {plan.answer} ★
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const targetGroups = Math.max(0, plan.answer);
+  const currentShown = Math.min(plan.a, groupCount * plan.b);
+  const fullTenCount = Math.floor(currentShown / 10);
+  const remDots = currentShown % 10;
 
   return (
-    <div data-testid="interactive-visual-add">
+    <div data-testid="interactive-make10-div">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
-          Tap Eggs &amp; Chicks to Count ({a} + {b})
+          Build Groups of {plan.b} up to {plan.a}
         </span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
-            data-testid="visual-count-all-btn"
-            onClick={() => {
-              setAddUnitsA((prev) => prev.map((u) => ({ ...u, hatched: true })));
-              setAddUnitsB((prev) => prev.map((u) => ({ ...u, hatched: true })));
-            }}
-            className="rounded-lg border border-[#15803d] bg-[#dcfce7] px-2 py-0.5 text-xs font-extrabold text-[#166534] hover:bg-[#bbf7d0]"
+            disabled={groupCount <= 0}
+            onClick={() => setGroupCount((g) => Math.max(0, g - 1))}
+            className="rounded-lg border border-[#cbd5e1] bg-white px-2 py-0.5 text-xs font-extrabold text-[#475569] disabled:opacity-50"
           >
-            Count All
+            −1 Group
           </button>
           <button
             type="button"
-            onClick={() => {
-              setAddUnitsA(buildEggUnits(a, 'addA', 24));
-              setAddUnitsB(buildEggUnits(b, 'addB', 24));
-            }}
+            data-testid="make10-action-btn"
+            disabled={groupCount >= targetGroups}
+            onClick={() => setGroupCount((g) => Math.min(targetGroups, g + 1))}
+            className="rounded-lg border border-[#0369a1] bg-[#e0f2fe] px-2.5 py-0.5 text-xs font-extrabold text-[#0c4a6e] hover:bg-[#bae6fd] disabled:opacity-50"
+          >
+            +1 Group (+{plan.b})
+          </button>
+          <button
+            type="button"
+            onClick={() => setGroupCount(targetGroups)}
+            className="rounded-lg border border-[#d6be9b] bg-[#fcf7ec] px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
+          >
+            Reach {plan.a}
+          </button>
+          <button
+            type="button"
+            onClick={resetAll}
             className="rounded-lg border border-[#d6be9b] bg-white px-2 py-0.5 text-xs font-extrabold text-[#78532a]"
           >
             Reset
           </button>
-          <span
-            data-testid="visual-add-counted"
-            className="rounded-lg bg-[#dcfce7] px-2 py-0.5 text-xs font-extrabold text-[#166534] tabular-nums"
-          >
-            Counted: {totalCounted}
-          </span>
         </div>
       </div>
-      <div className="space-y-2 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
-        <div>
-          <div className="mb-1 text-xs font-extrabold text-[#15803d]">
-            Group 1 · {a} Whole Eggs (tap to hatch &amp; count):
-          </div>
-          <div className="flex max-h-28 flex-wrap items-center gap-1 overflow-y-auto">
-            {addUnitsA.map((unit) => (
-              <button
-                key={unit.id}
-                type="button"
-                onClick={() =>
-                  setAddUnitsA((prev) =>
-                    prev.map((u) => (u.id === unit.id ? { ...u, hatched: !u.hatched } : u))
-                  )
-                }
-                className={`inline-flex items-center justify-center rounded-xl border p-0.5 transition ${
-                  unit.hatched
-                    ? 'scale-105 border-[#16a34a] bg-[#dcfce7]'
-                    : 'border-[#fde68a] bg-[#fffbeb] hover:scale-105'
-                }`}
-              >
-                {unit.value > 1 ? (
-                  <EggContainerBadge value={unit.value} hatched={unit.hatched} kind="egg" />
-                ) : unit.hatched ? (
-                  <HatchedChickSvg size={22} />
-                ) : (
-                  <WholeEggSvg size={20} />
-                )}
-              </button>
-            ))}
-          </div>
+
+      <div className="space-y-3 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {Array.from({ length: Math.min(fullTenCount, 4) }).map((_, i) => (
+            <TenFrameGrid key={i} primaryCount={10} completeHighlight label={`Ten #${i + 1}`} />
+          ))}
+          {fullTenCount > 4 && (
+            <FriendlyTenBadges count={fullTenCount - 4} tone="green" />
+          )}
+          {(remDots > 0 || currentShown === 0) && (
+            <TenFrameGrid
+              primaryCount={remDots}
+              targetNeeded={10 - remDots}
+              label="Filling"
+              onSlotClick={
+                groupCount < targetGroups
+                  ? (kind) => {
+                      if (kind === 'target') {
+                        setGroupCount((g) => Math.min(targetGroups, g + 1));
+                      }
+                    }
+                  : undefined
+              }
+            />
+          )}
         </div>
 
-        <div className="border-t border-[#e2e8f0] pt-2">
-          <div className="mb-1 text-xs font-extrabold text-[#0369a1]">
-            Group 2 · {b} Hatched Chicks (tap to count):
-          </div>
-          <div className="flex max-h-28 flex-wrap items-center gap-1 overflow-y-auto">
-            {addUnitsB.map((unit) => (
-              <button
-                key={unit.id}
-                type="button"
-                onClick={() =>
-                  setAddUnitsB((prev) =>
-                    prev.map((u) => (u.id === unit.id ? { ...u, hatched: !u.hatched } : u))
-                  )
-                }
-                className={`inline-flex items-center justify-center rounded-xl border p-0.5 transition ${
-                  unit.hatched
-                    ? 'scale-105 border-[#0284c7] bg-[#e0f2fe]'
-                    : 'border-[#e2e8f0] bg-white hover:scale-105'
-                }`}
-              >
-                {unit.value > 1 ? (
-                  <EggContainerBadge value={unit.value} hatched={unit.hatched} kind="chick" />
-                ) : (
-                  <HatchedChickSvg size={22} dimmed={!unit.hatched} />
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {onSubmitAnswer && totalCounted === problem.answer && (
-          <div className="flex items-center justify-between border-t border-[#e2e8f0] pt-2">
-            <span className="text-xs font-extrabold text-[#15803d]">
-              {a} + {b} = {totalCounted} eggs &amp; chicks!
-            </span>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2">
+          <span className="text-xs font-extrabold text-[#475569] tabular-nums">
+            {groupCount} group{groupCount === 1 ? '' : 's'} of {plan.b} = {currentShown} / {plan.a}
+          </span>
+          {onSubmitAnswer && groupCount === targetGroups && (
             <button
               type="button"
-              data-testid="visual-submit-btn"
-              onClick={() => onSubmitAnswer(totalCounted)}
-              className="rounded-lg border border-[#15803d] bg-[#22c55e] px-2.5 py-0.5 text-xs font-bold text-white"
+              data-testid="make10-submit-btn"
+              onClick={() => onSubmitAnswer(targetGroups)}
+              className="rounded-lg border border-[#15803d] bg-[#22c55e] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#16a34a]"
             >
-              Submit {totalCounted} ★
+              Submit {targetGroups} ★
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

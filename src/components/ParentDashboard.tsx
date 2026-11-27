@@ -1,6 +1,30 @@
 import React from 'react';
-import { Award, Calendar, CheckCircle2, Download, Medal, RotateCcw, Sparkles, TrendingUp, X } from 'lucide-react';
+import {
+  Award,
+  Calendar,
+  CalendarCheck,
+  CheckCircle2,
+  Compass,
+  Crown,
+  Divide,
+  Download,
+  FileText,
+  Flame,
+  Flower2,
+  Medal,
+  Minus,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Sprout,
+  Star,
+  TrendingUp,
+  Trophy,
+  X,
+  Zap,
+} from 'lucide-react';
 import { DIFFICULTY_LABELS, MILESTONE_DEFS, OPERATION_LABELS } from '../game/mathEngine';
+import { downloadParentReportPdf } from '../game/exportPdf';
 import {
   buildParentRecommendation,
   exportProgressCsv,
@@ -14,6 +38,105 @@ interface ParentDashboardProps {
   onLoadSampleWeek: () => void;
   onResetProgress: () => void;
   onClose: () => void;
+}
+
+function getMilestoneIconConfig(id: string): {
+  Icon: React.ComponentType<{ className?: string }>;
+  badgeClass: string;
+  unlockedBadgeClass: string;
+} {
+  switch (id) {
+    case 'first_10':
+      return {
+        Icon: Sprout,
+        badgeClass: 'border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]',
+        unlockedBadgeClass: 'border-[#16a34a] bg-[#dcfce7] text-[#15803d]',
+      };
+    case 'half_century':
+      return {
+        Icon: Compass,
+        badgeClass: 'border-[#bae6fd] bg-[#f0f9ff] text-[#0284c7]',
+        unlockedBadgeClass: 'border-[#0284c7] bg-[#e0f2fe] text-[#0369a1]',
+      };
+    case 'century_club':
+      return {
+        Icon: Award,
+        badgeClass: 'border-[#fde68a] bg-[#fffbeb] text-[#d97706]',
+        unlockedBadgeClass: 'border-[#d97706] bg-[#fef3c7] text-[#b45309]',
+      };
+    case 'thousand_club':
+      return {
+        Icon: Crown,
+        badgeClass: 'border-[#fde047] bg-[#fefce8] text-[#ca8a04]',
+        unlockedBadgeClass: 'border-[#eab308] bg-[#fef08a] text-[#854d0e]',
+      };
+    case 'combo_5':
+      return {
+        Icon: Zap,
+        badgeClass: 'border-[#fed7aa] bg-[#fff7ed] text-[#ea580c]',
+        unlockedBadgeClass: 'border-[#ea580c] bg-[#ffedd5] text-[#c2410c]',
+      };
+    case 'combo_12':
+      return {
+        Icon: Flame,
+        badgeClass: 'border-[#fecaca] bg-[#fef2f2] text-[#dc2626]',
+        unlockedBadgeClass: 'border-[#dc2626] bg-[#fee2e2] text-[#b91c1c]',
+      };
+    case 'add_scout':
+      return {
+        Icon: Plus,
+        badgeClass: 'border-[#bbf7d0] bg-[#f0fdf4] text-[#16a34a]',
+        unlockedBadgeClass: 'border-[#16a34a] bg-[#dcfce7] text-[#15803d]',
+      };
+    case 'sub_scout':
+      return {
+        Icon: Minus,
+        badgeClass: 'border-[#fed7aa] bg-[#fff7ed] text-[#ea580c]',
+        unlockedBadgeClass: 'border-[#ea580c] bg-[#ffedd5] text-[#c2410c]',
+      };
+    case 'mul_wizard':
+      return {
+        Icon: Sparkles,
+        badgeClass: 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]',
+        unlockedBadgeClass: 'border-[#2563eb] bg-[#dbeafe] text-[#1d4ed8]',
+      };
+    case 'div_captain':
+      return {
+        Icon: Divide,
+        badgeClass: 'border-[#e9d5ff] bg-[#faf5ff] text-[#9333ea]',
+        unlockedBadgeClass: 'border-[#9333ea] bg-[#f3e8ff] text-[#7e22ce]',
+      };
+    case 'streak_3':
+      return {
+        Icon: Calendar,
+        badgeClass: 'border-[#fde68a] bg-[#fffbeb] text-[#b45309]',
+        unlockedBadgeClass: 'border-[#d97706] bg-[#fef3c7] text-[#92400e]',
+      };
+    case 'daily_streak_7':
+      return {
+        Icon: CalendarCheck,
+        badgeClass: 'border-[#99f6e4] bg-[#f0fdfa] text-[#0d9488]',
+        unlockedBadgeClass: 'border-[#0d9488] bg-[#ccfbf1] text-[#0f766e]',
+      };
+    case 'daily_streak_30':
+      return {
+        Icon: Trophy,
+        badgeClass: 'border-[#fbcfe8] bg-[#fdf2f8] text-[#db2777]',
+        unlockedBadgeClass: 'border-[#db2777] bg-[#fce7f3] text-[#be185d]',
+      };
+    case 'garden_builder':
+      return {
+        Icon: Flower2,
+        badgeClass: 'border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]',
+        unlockedBadgeClass: 'border-[#16a34a] bg-[#dcfce7] text-[#166534]',
+      };
+    default:
+      return {
+        Icon: Star,
+        badgeClass: 'border-[#fde68a] bg-[#fffbeb] text-[#d97706]',
+        unlockedBadgeClass: 'border-[#d97706] bg-[#fef3c7] text-[#b45309]',
+      };
+  }
 }
 
 export const ParentDashboard: React.FC<ParentDashboardProps> = ({
@@ -47,6 +170,10 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadPdf = () => {
+    downloadParentReportPdf(progress);
+  };
+
   return (
     <div
       role="dialog"
@@ -76,6 +203,15 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
                 Preview Sample Week
               </button>
             )}
+            <button
+              type="button"
+              data-testid="parent-download-pdf-btn"
+              onClick={handleDownloadPdf}
+              className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#b45309] bg-[#fef3c7] px-3 py-1.5 text-xs font-extrabold text-[#92400e] hover:bg-[#fde68a]"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Export PDF
+            </button>
             <button
               type="button"
               onClick={handleExportCsv}
@@ -395,27 +531,38 @@ export const ParentDashboard: React.FC<ParentDashboardProps> = ({
                 const val = m.getValue(progress);
                 const unlocked = progress.unlockedMilestones.includes(m.id) || val >= m.target;
                 const pct = Math.min(100, Math.round((val / m.target) * 100));
+                const { Icon: MilestoneIcon, badgeClass, unlockedBadgeClass } = getMilestoneIconConfig(m.id);
                 return (
                   <div
                     key={m.id}
+                    data-testid={`milestone-card-${m.id}`}
                     className={`rounded-2xl border-2 p-3 ${
                       unlocked
                         ? 'border-[#22c55e] bg-[#f0fdf4]'
                         : 'border-[#e7d8c0] bg-white'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-display text-sm font-bold text-[#3f2208]">
-                          {m.title}
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-start gap-2.5">
+                        <div
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-2 ${
+                            unlocked ? unlockedBadgeClass : badgeClass
+                          }`}
+                        >
+                          <MilestoneIcon className="h-4.5 w-4.5" />
                         </div>
-                        <div className="text-[11px] font-bold text-[#78532a]">{m.description}</div>
+                        <div>
+                          <div className="font-display text-sm font-bold text-[#3f2208]">
+                            {m.title}
+                          </div>
+                          <div className="text-[11px] font-bold text-[#78532a]">{m.description}</div>
+                        </div>
                       </div>
                       {unlocked && (
                         <CheckCircle2 className="h-5 w-5 shrink-0 text-[#16a34a]" />
                       )}
                     </div>
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-2.5 flex items-center gap-2">
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#e7d8c0]">
                         <div
                           className={`h-full ${unlocked ? 'bg-[#16a34a]' : 'bg-[#f59e0b]'}`}

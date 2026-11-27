@@ -21,7 +21,7 @@ export type UpgradeId =
 
 export type VisitorSpecies = 'rabbit' | 'squirrel';
 
-export type ScratchStrategy = 'vertical' | 'numberline' | 'blocks' | 'visual';
+export type ScratchStrategy = 'vertical' | 'numberline' | 'blocks' | 'make10';
 
 export type AccessoryId = 'none' | 'leaf_crown' | 'sun_hat' | 'wizard_cap' | 'star_glasses';
 

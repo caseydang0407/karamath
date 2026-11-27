@@ -639,8 +639,8 @@ export const OPERATION_LABELS: Record<Operation, { name: string; symbol: '+' | '
 export const DIFFICULTY_LABELS: Record<DifficultyLevel, { name: string; subtitle: string }> = {
   1: { name: 'Sprout', subtitle: '1-Digit Only (1–9)' },
   2: { name: 'Sapling', subtitle: 'Max 2 Digits (1–99)' },
-  3: { name: 'Oak', subtitle: '2-Digit Challenge' },
-  4: { name: 'Starlight', subtitle: 'Mastery & Big Numbers' },
+  3: { name: 'Oak', subtitle: 'Max 3 Digits (1–999)' },
+  4: { name: 'Starlight', subtitle: '4–6 Digits (1k–999k)' },
 };
 
 export const MILESTONE_DEFS: MilestoneDef[] = [
@@ -666,6 +666,14 @@ export const MILESTONE_DEFS: MilestoneDef[] = [
     description: 'Solve 100 math problems total',
     category: 'practice',
     target: 100,
+    getValue: (p) => p.totalCorrect,
+  },
+  {
+    id: 'thousand_club',
+    title: '1000 Math Master',
+    description: 'Solve 1,000 math problems total',
+    category: 'practice',
+    target: 1000,
     getValue: (p) => p.totalCorrect,
   },
   {
@@ -722,6 +730,22 @@ export const MILESTONE_DEFS: MilestoneDef[] = [
     description: 'Practice 3 days in a row',
     category: 'streak',
     target: 3,
+    getValue: (p) => p.currentDailyStreak,
+  },
+  {
+    id: 'daily_streak_7',
+    title: '7-Day Meadow Habit',
+    description: 'Practice 7 days in a row',
+    category: 'streak',
+    target: 7,
+    getValue: (p) => p.currentDailyStreak,
+  },
+  {
+    id: 'daily_streak_30',
+    title: '30-Day Meadow Habit',
+    description: 'Practice 30 days in a row',
+    category: 'streak',
+    target: 30,
     getValue: (p) => p.currentDailyStreak,
   },
   {
@@ -801,6 +825,13 @@ export function buildHint(a: number, b: number, op: Operation): string {
   return `Think backwards: ${b} × ? = ${a}`;
 }
 
+function pickStarlightScale(rng: () => number): [number, number] {
+  const digits = randInt(4, 6, rng);
+  if (digits === 4) return [1000, 9999];
+  if (digits === 5) return [10000, 99999];
+  return [100000, 999999];
+}
+
 export function generateProblem(
   ops: Operation[],
   tier: DifficultyLevel,
@@ -820,11 +851,15 @@ export function generateProblem(
       a = randInt(10, 49, rng);
       b = randInt(2, Math.min(29, 99 - a), rng);
     } else if (tier === 3) {
-      a = randInt(15, 79, rng);
-      b = randInt(12, 68, rng);
+      // Oak: max 3 digits (a, b, and sum <= 999)
+      a = randInt(60, 799, rng);
+      b = randInt(20, Math.min(499, 999 - a), rng);
     } else {
-      a = randInt(35, 149, rng);
-      b = randInt(24, 99, rng);
+      // Starlight: randomly 4 to 6 digits (1,000..999,999)
+      const [minS, maxS] = pickStarlightScale(rng);
+      const capA = Math.min(maxS, 899999);
+      a = randInt(minS, capA, rng);
+      b = randInt(1000, Math.min(maxS, 999999 - a), rng);
     }
     answer = a + b;
   } else if (operation === 'sub') {
@@ -835,11 +870,14 @@ export function generateProblem(
       a = randInt(12, 69, rng);
       b = randInt(3, Math.min(29, a - 1), rng);
     } else if (tier === 3) {
-      a = randInt(28, 99, rng);
-      b = randInt(11, a - 5, rng);
+      // Oak: max 3 digits (a, b, and difference <= 999)
+      a = randInt(100, 999, rng);
+      b = randInt(15, a - 10, rng);
     } else {
-      a = randInt(55, 199, rng);
-      b = randInt(18, a - 12, rng);
+      // Starlight: randomly 4 to 6 digits (1,000..999,999)
+      const [minS, maxS] = pickStarlightScale(rng);
+      a = randInt(Math.max(2000, minS), maxS, rng);
+      b = randInt(1000, Math.max(1000, a - 1000), rng);
     }
     answer = a - b;
   } else if (operation === 'mul') {
@@ -850,11 +888,18 @@ export function generateProblem(
       a = randInt(2, 9, rng);
       b = randInt(2, 9, rng);
     } else if (tier === 3) {
-      a = randInt(10, 18, rng);
-      b = randInt(2, 9, rng);
+      // Oak: max 3 digits (product <= 999)
+      a = randInt(12, 99, rng);
+      b = randInt(2, Math.min(19, Math.floor(999 / a)), rng);
     } else {
-      a = randInt(11, 24, rng);
-      b = randInt(4, 12, rng);
+      // Starlight: 4-5 digit multiplicand with product in 4-6 digits (<= 999,999)
+      if (randInt(0, 1, rng) === 0) {
+        a = randInt(1000, 9999, rng);
+        b = randInt(2, Math.min(99, Math.floor(999999 / a)), rng);
+      } else {
+        a = randInt(10000, 99999, rng);
+        b = randInt(2, Math.min(9, Math.floor(999999 / a)), rng);
+      }
     }
     answer = a * b;
   } else {
@@ -878,12 +923,17 @@ export function generateProblem(
       divisor = randInt(2, 9, rng);
       quotient = randInt(2, 9, rng);
     } else if (tier === 3) {
-      divisor = randInt(2, 9, rng);
-      const maxQ = Math.floor(99 / divisor);
-      quotient = randInt(Math.min(6, maxQ), maxQ, rng);
+      // Oak: max 3 digits (dividend <= 999)
+      divisor = randInt(2, 12, rng);
+      const maxQ = Math.floor(999 / divisor);
+      quotient = randInt(Math.min(10, maxQ), maxQ, rng);
     } else {
-      divisor = randInt(3, 12, rng);
-      quotient = randInt(8, 18, rng);
+      // Starlight: dividend randomly 4 to 6 digits (1,000..999,999)
+      const [minS, maxS] = pickStarlightScale(rng);
+      divisor = randInt(2, 99, rng);
+      const minQ = Math.ceil(minS / divisor);
+      const maxQ = Math.floor(maxS / divisor);
+      quotient = randInt(minQ, maxQ, rng);
     }
     a = divisor * quotient;
     b = divisor;
@@ -914,9 +964,13 @@ export function generateDistractors(
 ): number[] {
   const set = new Set<number>([answer]);
   const offsets =
-    tier >= 2 && (op === 'add' || op === 'sub')
-      ? [-10, 10, -2, 2, -1, 1, -3, 3, -5, 5]
-      : [-2, 2, -1, 1, -3, 3, -4, 4, 5, -5];
+    answer >= 1000
+      ? [-1000, 1000, -100, 100, -10, 10, -2, 2, -1, 1]
+      : answer >= 100
+        ? [-100, 100, -10, 10, -2, 2, -1, 1, -5, 5]
+        : tier >= 2 && (op === 'add' || op === 'sub')
+          ? [-10, 10, -2, 2, -1, 1, -3, 3, -5, 5]
+          : [-2, 2, -1, 1, -3, 3, -4, 4, 5, -5];
 
   let guard = 0;
   while (set.size < 4 && guard < 40) {

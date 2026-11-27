@@ -13,6 +13,7 @@ import {
   getEffectiveTier,
   getUpgradeCost,
   isUpgradeLocked,
+  MILESTONE_DEFS,
   OUTFIT_ITEMS,
   purchaseOutfitItem,
   purchaseOutfitStage,
@@ -21,13 +22,9 @@ import {
   sortUpgradesForDisplay,
   UPGRADE_DEFS,
 } from './mathEngine';
-import { clearProgressCookies, createInitialProgress, loadProgress } from './storage';
-import {
-  breakEggContainer,
-  buildEggUnits,
-  hatchExactEggs,
-  sumEggUnits,
-} from './visualGroups';
+import { clearProgressCookies, createInitialProgress, generateSampleWeekProgress, loadProgress } from './storage';
+import { buildParentReportPdfBytes } from './exportPdf';
+import { buildMakeTenPlan } from './makeTen';
 import { computeLightingCycle } from '../three/lightingCycle';
 import { getWeatherMoodModifiers, pickRandomWeather } from '../three/weatherSystem';
 import type { DifficultyLevel, Operation } from './types';
@@ -75,13 +72,33 @@ test('generates valid problems for all operations and tiers with 4 unique non-ne
         }
         if (tier === 3) {
           assert.ok(
-            p.a <= 99 && p.b <= 99,
-            `tier 3 ${op} operands must be max 2 digits (${p.a} ${p.symbol} ${p.b})`
+            p.a <= 999 && p.b <= 999 && p.answer <= 999,
+            `tier 3 ${op} must be max 3 digits (${p.a} ${p.symbol} ${p.b} = ${p.answer})`
           );
+        }
+        if (tier === 4) {
+          assert.ok(
+            p.a >= 1000 && p.a <= 999999 && p.b <= 999999 && p.answer <= 999999,
+            `tier 4 ${op} must stay within 4 to 6 digits (${p.a} ${p.symbol} ${p.b} = ${p.answer})`
+          );
+          if (op === 'add' || op === 'sub') {
+            assert.ok(p.b >= 1000 && p.answer >= 1000, `tier 4 ${op} operands & answer must be 4-6 digits (${p.a} ${p.symbol} ${p.b} = ${p.answer})`);
+          }
+          if (op === 'mul') {
+            assert.ok(p.answer >= 1000, `tier 4 mul product must be 4-6 digits (${p.a} * ${p.b} = ${p.answer})`);
+          }
         }
       }
     }
   }
+
+  // Ensure Starlight samples across 4-digit, 5-digit, and 6-digit magnitudes
+  const lengths = new Set<number>();
+  for (let i = 0; i < 60; i++) {
+    const p = generateProblem(['add'], 4, rng);
+    lengths.add(String(p.a).length);
+  }
+  assert.ok(lengths.has(4) && lengths.has(5) && lengths.has(6), 'Starlight should cover 4, 5, and 6 digit scales');
 });
 
 test('combo multiplier scales up and respects pinwheel and flower upgrade caps', () => {
@@ -504,31 +521,122 @@ test('sortUpgradesForDisplay puts eligible affordable upgrades at the top and ma
   assert.deepEqual(sortedIds.slice(-4), ['kaitlyn', 'joshua', 'katy', 'well']);
 });
 
-test('visual egg/chick groups stay exact across 1-digit, 2-digit, and 3-digit problems', () => {
-  // Small numbers stay individual 1-egg units
-  const smallUnits = buildEggUnits(14, 'test', 24);
-  assert.equal(smallUnits.length, 14);
-  assert.equal(sumEggUnits(smallUnits), 14);
+test('buildMakeTenPlan decomposes addition, subtraction, multiplication, and division cleanly for Make a 10', () => {
+  const mk = (a: number, b: number, operation: Operation, answer: number) => ({
+    id: `t-${a}-${operation}-${b}`,
+    a,
+    b,
+    operation,
+    symbol: (operation === 'add' ? '+' : operation === 'sub' ? '−' : operation === 'mul' ? '×' : '÷') as '+' | '−' | '×' | '÷',
+    answer,
+    choices: [answer, answer + 1, answer + 2, answer + 3],
+    hint: '',
+    tier: 1 as DifficultyLevel,
+  });
 
-  // Larger numbers decompose cleanly into 100-crates, 10-cartons, and 1-eggs
-  const bigUnits = buildEggUnits(147, 'test', 30);
-  assert.equal(sumEggUnits(bigUnits), 147);
-  assert.equal(bigUnits.filter((u) => u.value === 100).length, 1);
-  assert.equal(bigUnits.filter((u) => u.value === 10).length, 4);
-  assert.equal(bigUnits.filter((u) => u.value === 1).length, 7);
+  // 1-digit make 10: 8 + 5 = (8 + 2) + 3 = 10 + 3 = 13
+  const p1 = buildMakeTenPlan(mk(8, 5, 'add', 13));
+  assert.equal(p1.mode, 'add-make-ten');
+  assert.equal(p1.anchor, 8);
+  assert.equal(p1.other, 5);
+  assert.equal(p1.neededToTen, 2);
+  assert.equal(p1.friendlyTarget, 10);
+  assert.equal(p1.leftover, 3);
+  assert.equal(p1.canMakeTen, true);
 
-  // Unpacking a 10-tray preserves exact total
-  const broken = breakEggContainer(bigUnits);
-  assert.equal(sumEggUnits(broken), 147);
-  assert.equal(broken.filter((u) => u.value === 1).length, 17);
+  // 2-digit make next friendly 10: 27 + 6 = 30 + 3
+  const p2 = buildMakeTenPlan(mk(6, 27, 'add', 33));
+  assert.equal(p2.mode, 'add-make-ten');
+  assert.equal(p2.anchor, 27);
+  assert.equal(p2.other, 6);
+  assert.equal(p2.neededToTen, 3);
+  assert.equal(p2.friendlyTarget, 30);
+  assert.equal(p2.leftover, 3);
 
-  // Hatching exact subtraction amount across regrouping boundaries (e.g. 142 - 68 = 74)
-  const subStart = buildEggUnits(142, 'sub', 30);
-  const subAfter = hatchExactEggs(subStart, 68);
-  assert.equal(sumEggUnits(subAfter, true), 68);
-  assert.equal(sumEggUnits(subAfter, false), 74);
+  // 2-digit + 2-digit preserves exact other count across badges + dots
+  const p3 = buildMakeTenPlan(mk(37, 22, 'add', 59));
+  assert.equal(p3.mode, 'add-make-ten');
+  assert.equal(p3.otherBadges * 10 + p3.otherDots, 22);
+  assert.ok(p3.otherDots >= p3.neededToTen);
+  assert.equal(p3.friendlyTarget + p3.leftover, 59);
 
-  // Zero edge case
-  assert.equal(sumEggUnits(buildEggUnits(0, 'zero', 24)), 0);
+  // Under 10: 4 + 3
+  const p4 = buildMakeTenPlan(mk(4, 3, 'add', 7));
+  assert.equal(p4.mode, 'add-under-ten');
+  assert.equal(p4.canMakeTen, false);
+  assert.equal(p4.shortBy, 3);
+
+  // Already friendly 10: 20 + 5
+  const p5 = buildMakeTenPlan(mk(20, 5, 'add', 25));
+  assert.equal(p5.mode, 'add-already-ten');
+  assert.equal(p5.friendlyTarget, 20);
+  assert.equal(p5.leftover, 5);
+
+  // Subtraction bridge down to 10: 14 - 6 -> take 4 to 10, then 2 more = 8
+  const s1 = buildMakeTenPlan(mk(14, 6, 'sub', 8));
+  assert.equal(s1.mode, 'sub-bridge-ten');
+  assert.equal(s1.bridgeTake, 4);
+  assert.equal(s1.friendlyTarget, 10);
+  assert.equal(s1.bridgeRemainder, 2);
+
+  // Subtraction 2-digit bridge: 32 - 14 -> take 2 to 30, then 12 more = 18
+  const s2 = buildMakeTenPlan(mk(32, 14, 'sub', 18));
+  assert.equal(s2.mode, 'sub-bridge-ten');
+  assert.equal(s2.bridgeTake, 2);
+  assert.equal(s2.friendlyTarget, 30);
+  assert.equal(s2.bridgeRemainder, 12);
+
+  // Subtraction from friendly ten: 20 - 6
+  const s3 = buildMakeTenPlan(mk(20, 6, 'sub', 14));
+  assert.equal(s3.mode, 'sub-from-ten');
+  assert.equal(s3.friendlyTarget, 20);
+
+  // Multiplication split by 10s: 12 * 4 = (10 * 4) + (2 * 4) = 40 + 8
+  const m1 = buildMakeTenPlan(mk(12, 4, 'mul', 48));
+  assert.equal(m1.mode, 'mul-ten-split');
+  assert.equal(m1.friendlyTarget, 40);
+  assert.equal(m1.leftover, 8);
+
+  // Division 10-group chunk: 48 / 4 -> 10 * 4 = 40, rem 8 / 4 = 2
+  const d1 = buildMakeTenPlan(mk(48, 4, 'div', 12));
+  assert.equal(d1.mode, 'div-ten-chunk');
+  assert.equal(d1.friendlyTarget, 40);
+  assert.equal(d1.divRemGroups, 2);
 });
+
+test('MILESTONE_DEFS includes 1000 Math Master next to 100 Math Master and 7-Day & 30-Day Meadow Habit next to 3-Day Meadow Habit', () => {
+  const nonAch = MILESTONE_DEFS.filter((m) => m.category !== 'achievement');
+  const titles = nonAch.map((m) => m.title);
+  const idx100 = titles.indexOf('100 Math Master');
+  const idx1000 = titles.indexOf('1000 Math Master');
+  assert.ok(idx100 >= 0);
+  assert.equal(idx1000, idx100 + 1);
+
+  const idx3d = titles.indexOf('3-Day Meadow Habit');
+  const idx7d = titles.indexOf('7-Day Meadow Habit');
+  const idx30d = titles.indexOf('30-Day Meadow Habit');
+  assert.ok(idx3d >= 0);
+  assert.equal(idx7d, idx3d + 1);
+  assert.equal(idx30d, idx3d + 2);
+
+  // All milestone IDs across MILESTONE_DEFS must be unique (no streak_30 collision!)
+  assert.equal(new Set(MILESTONE_DEFS.map((m) => m.id)).size, MILESTONE_DEFS.length);
+
+  const p = createInitialProgress();
+  p.totalCorrect = 1000;
+  p.currentDailyStreak = 30;
+  assert.equal(MILESTONE_DEFS[idx1000].getValue(p), 1000);
+  assert.equal(MILESTONE_DEFS[idx7d].getValue(p), 30);
+  assert.equal(MILESTONE_DEFS[idx30d].getValue(p), 30);
+});
+
+test('buildParentReportPdfBytes produces a valid non-empty PDF document for parent reports', () => {
+  const sample = generateSampleWeekProgress(createInitialProgress(), new Date(2026, 10, 27, 12, 0, 0));
+  const bytes = buildParentReportPdfBytes(sample, new Date(2026, 10, 27, 12, 0, 0));
+  assert.ok(bytes.length > 500, 'PDF output must be non-empty');
+  const header = new TextDecoder().decode(bytes.slice(0, 5));
+  assert.equal(header, '%PDF-');
+});
+
+
 
