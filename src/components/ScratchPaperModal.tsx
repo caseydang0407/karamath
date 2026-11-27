@@ -14,6 +14,24 @@ import {
 } from 'lucide-react';
 import type { MathProblem, ScratchStrategy } from '../game/types';
 import { buildMakeTenPlan } from '../game/makeTen';
+import {
+  buildNumberLinePlan,
+  checkNumberLineAnswers,
+  type NumberLineCheckResult,
+  type NumberLineHopKind,
+} from '../game/numberLine';
+import {
+  breakBlockInZone,
+  buildInitialBlocksForProblem,
+  countZoneByValue,
+  decomposeToBlocks,
+  moveBlockToZone,
+  sumZoneValue,
+  tradeBlocksInZone,
+  type BlockValue,
+  type BlockZone,
+  type MovableBlock,
+} from '../game/baseBlocks';
 
 interface ScratchPaperModalProps {
   problem: MathProblem;
@@ -39,14 +57,6 @@ const PEN_COLORS = [
   { hex: '#dc2626', name: 'Carry Red' },
   { hex: '#2563eb', name: 'Sky Blue' },
 ];
-
-function splitPlaceValues(n: number): { h: number; t: number; o: number } {
-  return {
-    h: Math.floor(n / 100),
-    t: Math.floor((n % 100) / 10),
-    o: n % 10,
-  };
-}
 
 function getColumnDigits(n: number, cols: number): string[] {
   const s = String(n).padStart(cols, ' ');
@@ -290,6 +300,57 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
   const coachSteps = useMemo(() => {
     if (strategy === 'make10') {
       return buildMakeTenPlan(problem).steps;
+    }
+
+    if (strategy === 'numberline') {
+      if (problem.operation === 'div') {
+        return [
+          `Follow each +${problem.b} jump starting from 0 on the left.`,
+          `Type the landing number into each box below the number line.`,
+          `Enter the total number of jumps to reach ${problem.a}, then click Check Answer!`,
+        ];
+      }
+      if (problem.operation === 'sub') {
+        return [
+          `Start at ${problem.a} on the right and follow each backward jump.`,
+          `Fill in every landing number box below the number line from right to left.`,
+          `Click Check Answer at the end to verify your landing spot!`,
+        ];
+      }
+      return [
+        `Start at the green dot and follow each color-coded hop arrow.`,
+        `Fill in the running number inside every box below the number line.`,
+        `Click Check Answer at the end to verify your final answer!`,
+      ];
+    }
+
+    if (strategy === 'blocks') {
+      if (problem.operation === 'add') {
+        return [
+          `Drag blocks (or tap them) from Set 1 and Set 2 onto the Answer Mat below.`,
+          `If you collect 10 yellow Ones cubes, click "Trade 10 Ones → 10" to bundle a Ten rod.`,
+          `Click Check Answer to verify your total on the Answer Mat!`,
+        ];
+      }
+      if (problem.operation === 'sub') {
+        return [
+          `Drag (or tap) blocks totaling ${problem.b} from Start With into the Take Away tray.`,
+          `Need more Ones or Tens? Click "Break 10 → 10 Ones" or "Break 100 → 10 Tens" first!`,
+          `Check what remains in Start With—that leftover total is your answer!`,
+        ];
+      }
+      if (problem.operation === 'mul') {
+        return [
+          `Drag blocks or "+Group of ${problem.b}" bundles from the Supply onto the Answer Mat.`,
+          `Build ${problem.a} equal groups of ${problem.b}, trading 10 Ones into a Ten rod anytime.`,
+          `Click Check Answer when your Answer Mat matches ${problem.a} × ${problem.b}!`,
+        ];
+      }
+      return [
+        `Drag blocks from the Total Pile (${problem.a}) into the Group of ${problem.b} bin.`,
+        `Each time the bin reaches ${problem.b}, it banks 1 Equal Group automatically!`,
+        `Use "Break 10 → 10 Ones" if needed until all blocks are grouped, then Check Answer!`,
+      ];
     }
 
     const { a, b, operation } = problem;
@@ -712,7 +773,9 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
                 </div>
               )}
 
-              {strategy === 'numberline' && <NumberLineView problem={problem} />}
+              {strategy === 'numberline' && (
+                <NumberLineView problem={problem} onSubmitAnswer={onSubmitAnswer} />
+              )}
               {strategy === 'blocks' && (
                 <BaseBlocksView problem={problem} onSubmitAnswer={onSubmitAnswer} />
               )}
@@ -815,14 +878,19 @@ export const ScratchPaperModal: React.FC<ScratchPaperModalProps> = ({
   );
 };
 
-/* --- Sub-visualizers for Number Line, Base-10 Blocks, and Picture Groups --- */
-
-type HopKind = 'hundred' | 'ten' | 'one' | 'group';
+/* --- Interactive Number Line Strategy (Fillable Ticks Below Line + Check Answer) --- */
 
 const HOP_STYLE: Record<
-  HopKind,
+  NumberLineHopKind,
   { stroke: string; text: string; pillBg: string; pillBorder: string; peakY: number }
 > = {
+  thousand: {
+    stroke: '#0f766e',
+    text: '#115e59',
+    pillBg: '#ccfbf1',
+    pillBorder: '#14b8a6',
+    peakY: 8,
+  },
   hundred: {
     stroke: '#7e22ce',
     text: '#581c87',
@@ -835,308 +903,418 @@ const HOP_STYLE: Record<
     text: '#1e3a8a',
     pillBg: '#dbeafe',
     pillBorder: '#3b82f6',
-    peakY: 36,
+    peakY: 28,
   },
   one: {
     stroke: '#16a34a',
     text: '#14532d',
     pillBg: '#dcfce7',
     pillBorder: '#22c55e',
-    peakY: 56,
+    peakY: 42,
   },
   group: {
     stroke: '#d97706',
     text: '#78350f',
     pillBg: '#fef3c7',
     pillBorder: '#f59e0b',
-    peakY: 34,
+    peakY: 26,
   },
 };
 
-const NumberLineView: React.FC<{ problem: MathProblem }> = ({ problem }) => {
-  const { a, b, operation } = problem;
+const NumberLineView: React.FC<{
+  problem: MathProblem;
+  onSubmitAnswer?: (val: number) => void;
+}> = ({ problem, onSubmitAnswer }) => {
+  const plan = useMemo(() => buildNumberLinePlan(problem), [problem]);
+  const [tickInputs, setTickInputs] = useState<string[]>(() =>
+    Array.from({ length: plan.hops.length }, () => '')
+  );
+  const [finalJumpInput, setFinalJumpInput] = useState('');
+  const [activeHopIdx, setActiveHopIdx] = useState<number | null>(0);
+  const [checkResult, setCheckResult] = useState<NumberLineCheckResult | null>(null);
 
-  const hops: Array<{ label: string; kind: HopKind; delta?: number }> = [];
-  let startVal = a;
-  let startLabel = String(a);
-  let subtitle = '';
+  useEffect(() => {
+    setTickInputs(Array.from({ length: plan.hops.length }, () => ''));
+    setFinalJumpInput('');
+    setActiveHopIdx(0);
+    setCheckResult(null);
+  }, [problem.id, plan.hops.length]);
 
-  const pushPlaceHops = (amount: number, sign: 1 | -1) => {
-    const prefix = sign === 1 ? '+' : '−';
-    const hundreds = Math.floor(amount / 100);
-    const tens = Math.floor((amount % 100) / 10);
-    const ones = amount % 10;
-
-    if (amount <= 8) {
-      for (let i = 0; i < amount; i++) {
-        hops.push({ label: `${prefix}1`, kind: 'one', delta: sign });
-      }
-      return;
-    }
-
-    const shownHundreds = Math.min(hundreds, 3);
-    for (let i = 0; i < shownHundreds; i++) {
-      hops.push({ label: `${prefix}100`, kind: 'hundred', delta: sign * 100 });
-    }
-    if (hundreds > 3) {
-      const rem = (hundreds - 3) * 100;
-      hops.push({ label: `${prefix}${rem}`, kind: 'hundred', delta: sign * rem });
-    }
-
-    const shownTens = Math.min(tens, 4);
-    for (let i = 0; i < shownTens; i++) {
-      hops.push({ label: `${prefix}10`, kind: 'ten', delta: sign * 10 });
-    }
-    if (tens > 4) {
-      const rem = (tens - 4) * 10;
-      hops.push({ label: `${prefix}${rem}`, kind: 'ten', delta: sign * rem });
-    }
-
-    if (ones > 0) {
-      if (ones <= 3 && hops.length <= 6) {
-        for (let i = 0; i < ones; i++) {
-          hops.push({ label: `${prefix}1`, kind: 'one', delta: sign });
-        }
-      } else {
-        hops.push({ label: `${prefix}${ones}`, kind: 'one', delta: sign * ones });
-      }
-    }
-  };
-
-  if (operation === 'add') {
-    const start = Math.max(a, b);
-    const jump = Math.min(a, b);
-    startVal = start;
-    startLabel = String(start);
-    pushPlaceHops(jump, 1);
-    if (jump <= 8) {
-      subtitle = `Start at ${start} and hop forward ${jump} Ones (green)!`;
-    } else if (jump >= 100) {
-      subtitle = `Jump Hundreds (purple), then Tens (blue), then Ones (green)!`;
-    } else if (jump % 10 > 0) {
-      subtitle = `Start at ${start}, jump Tens (blue), then add Ones (green)!`;
-    } else {
-      subtitle = `Start at ${start} and jump forward by Tens (blue)!`;
-    }
-  } else if (operation === 'sub') {
-    startVal = a;
-    startLabel = String(a);
-    pushPlaceHops(b, -1);
-    if (b <= 8) {
-      subtitle = `Start at ${a} and hop backward ${b} Ones (green)!`;
-    } else if (b >= 100) {
-      subtitle = `Hop back Hundreds (purple), Tens (blue), then Ones (green)!`;
-    } else if (b % 10 > 0) {
-      subtitle = `Start at ${a}, hop back Tens (blue), then Ones (green)!`;
-    } else {
-      subtitle = `Start at ${a} and hop back by Tens (blue)!`;
-    }
-  } else if (operation === 'mul') {
-    startVal = 0;
-    startLabel = '0';
-    const shown = Math.min(a, 6);
-    const kind: HopKind =
-      b >= 100 && b % 100 === 0
-        ? 'hundred'
-        : b >= 10 && b % 10 === 0
-          ? 'ten'
-          : b < 10
-            ? 'group'
-            : 'group';
-    for (let i = 0; i < shown; i++) hops.push({ label: `+${b}`, kind, delta: b });
-    if (a > 6) hops.push({ label: `... (${a} total)`, kind: 'group' });
-    subtitle = `Skip-count from 0 by +${b}, doing ${a} equal jumps!`;
-  } else {
-    startVal = 0;
-    startLabel = '0';
-    hops.push({ label: `+${b}`, kind: 'group', delta: b });
-    if (a > b) {
-      hops.push({ label: `+${b}`, kind: 'group', delta: b });
-      hops.push({ label: '... (? jumps)', kind: 'group' });
-    }
-    subtitle = `Count how many jumps of +${b} take you from 0 to ${a}!`;
-  }
-
-  const isBackward = operation === 'sub';
-  const count = Math.max(1, hops.length);
-  const startX = isBackward ? 352 : 48;
-  const endX = isBackward ? 48 : 352;
+  const count = Math.max(1, plan.hops.length);
+  const startX = plan.isBackward ? 352 : 48;
+  const endX = plan.isBackward ? 48 : 352;
   const stepX = (endX - startX) / count;
 
-  const hasHundred = hops.some((h) => h.kind === 'hundred');
-  const hasTen = hops.some((h) => h.kind === 'ten');
-  const hasOne = hops.some((h) => h.kind === 'one');
-  const hasGroup = hops.some((h) => h.kind === 'group');
+  const hasThousand = plan.hops.some((h) => h.kind === 'thousand');
+  const hasHundred = plan.hops.some((h) => h.kind === 'hundred');
+  const hasTen = plan.hops.some((h) => h.kind === 'ten');
+  const hasOne = plan.hops.some((h) => h.kind === 'one');
+  const hasGroup = plan.hops.some((h) => h.kind === 'group');
 
-  // Precompute intermediate tick values (never reveal final answer)
-  const intermediateTicks: Array<{ x: number; label: string; color: string }> = [];
-  if (operation !== 'div' && hops.every((h) => typeof h.delta === 'number') && hops.length <= 8) {
-    let running = startVal;
-    for (let i = 0; i < hops.length - 1; i++) {
-      running += hops[i].delta ?? 0;
-      intermediateTicks.push({
-        x: startX + (i + 1) * stepX,
-        label: String(running),
-        color: HOP_STYLE[hops[i].kind].text,
-      });
-    }
-  }
+  const maxDigits = Math.max(
+    String(plan.startVal).length,
+    String(problem.a).length,
+    String(problem.answer).length
+  );
+  const inputWidthClass =
+    maxDigits >= 6 ? 'w-16 text-xs' : maxDigits >= 4 ? 'w-14 text-xs' : 'w-12 text-sm';
+
+  const handleTickChange = (idx: number, raw: string) => {
+    const cleaned = raw.replace(/\D/g, '').slice(0, 7);
+    setTickInputs((prev) => {
+      const next = [...prev];
+      next[idx] = cleaned;
+      return next;
+    });
+    setCheckResult(null);
+  };
+
+  const handleReset = () => {
+    setTickInputs(Array.from({ length: plan.hops.length }, () => ''));
+    setFinalJumpInput('');
+    setActiveHopIdx(0);
+    setCheckResult(null);
+  };
+
+  const handleCheck = () => {
+    const res = checkNumberLineAnswers(plan, tickInputs, finalJumpInput);
+    setCheckResult(res);
+  };
 
   return (
     <div data-testid="number-line-view">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
-          Number Line Strategy
+          Interactive Number Line
         </span>
-        {/* Place-Value Hop Color Legend */}
-        <div data-testid="numberline-legend" className="flex flex-wrap items-center gap-1.5 text-[10px] font-extrabold">
-          {(hasHundred || problem.a >= 100 || problem.b >= 100) && (
-            <span className="rounded-md border border-[#a855f7] bg-[#f3e8ff] px-1.5 py-0.5 text-[#581c87]">
-              100s Purple
-            </span>
-          )}
-          {(hasTen || operation === 'add' || operation === 'sub') && (
-            <span className="rounded-md border border-[#3b82f6] bg-[#dbeafe] px-1.5 py-0.5 text-[#1e3a8a]">
-              10s Blue
-            </span>
-          )}
-          {(hasOne || operation === 'add' || operation === 'sub') && (
-            <span className="rounded-md border border-[#22c55e] bg-[#dcfce7] px-1.5 py-0.5 text-[#14532d]">
-              1s Green
-            </span>
-          )}
-          {hasGroup && (
-            <span className="rounded-md border border-[#f59e0b] bg-[#fef3c7] px-1.5 py-0.5 text-[#78350f]">
-              Equal Jumps
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Place-Value Hop Color Legend */}
+          <div
+            data-testid="numberline-legend"
+            className="flex flex-wrap items-center gap-1 text-[10px] font-extrabold"
+          >
+            {hasThousand && (
+              <span className="rounded-md border border-[#14b8a6] bg-[#ccfbf1] px-1.5 py-0.5 text-[#115e59]">
+                1000s Teal
+              </span>
+            )}
+            {(hasHundred || (!hasThousand && (problem.a >= 100 || problem.b >= 100))) && (
+              <span className="rounded-md border border-[#a855f7] bg-[#f3e8ff] px-1.5 py-0.5 text-[#581c87]">
+                100s Purple
+              </span>
+            )}
+            {hasTen && (
+              <span className="rounded-md border border-[#3b82f6] bg-[#dbeafe] px-1.5 py-0.5 text-[#1e3a8a]">
+                10s Blue
+              </span>
+            )}
+            {hasOne && (
+              <span className="rounded-md border border-[#22c55e] bg-[#dcfce7] px-1.5 py-0.5 text-[#14532d]">
+                1s Green
+              </span>
+            )}
+            {hasGroup && (
+              <span className="rounded-md border border-[#f59e0b] bg-[#fef3c7] px-1.5 py-0.5 text-[#78350f]">
+                Equal Jumps
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            data-testid="numberline-reset-btn"
+            onClick={handleReset}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#d6be9b] bg-[#fcf7ec] px-2 py-0.5 text-[11px] font-extrabold text-[#78532a] hover:bg-[#fef3c7]"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Reset
+          </button>
         </div>
       </div>
+
       <div className="rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-3">
-        <svg viewBox="0 0 400 148" className="w-full" role="img" aria-label="Color-coded place value number line hops">
-          <line x1="28" y1="106" x2="372" y2="106" stroke="#334155" strokeWidth="3" strokeLinecap="round" />
-          <polygon points="372,101 382,106 372,111" fill="#334155" />
-          <polygon points="28,101 18,106 28,111" fill="#334155" />
+        <div className="overflow-x-auto">
+          <div className={count >= 6 || (count >= 4 && maxDigits >= 4) ? 'min-w-[390px]' : 'w-full'}>
+          {/* SVG Number Line with Hops & Tick Marks */}
+          <svg
+            viewBox="0 0 400 106"
+            className="w-full"
+            role="img"
+            aria-label="Interactive number line with hops and fillable tick boxes below"
+          >
+            <line
+              x1="24"
+              y1="88"
+              x2="376"
+              y2="88"
+              stroke="#334155"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+            <polygon points="376,83 386,88 376,93" fill="#334155" />
+            <polygon points="24,83 14,88 24,93" fill="#334155" />
 
-          {hops.map((hop, idx) => {
-            const x1 = startX + idx * stepX;
-            const x2 = startX + (idx + 1) * stepX;
-            const midX = (x1 + x2) / 2;
-            const st = HOP_STYLE[hop.kind];
-            // Place label slightly above the quadratic Bezier apex (which sits halfway between 103 and peakY)
-            const apexY = (103 + st.peakY) / 2;
-            const pillW = Math.max(24, hop.label.length * 7.2 + 8);
-            const pillY = Math.max(2, apexY - 19);
-            return (
-              <g key={idx}>
-                <path
-                  d={`M ${x1} 103 Q ${midX} ${st.peakY} ${x2} 103`}
-                  fill="none"
-                  stroke={st.stroke}
-                  strokeWidth="3"
-                  strokeDasharray={hop.label.startsWith('...') ? '4 3' : undefined}
-                />
-                <circle cx={x1} cy="106" r="4.2" fill={st.stroke} />
-                <rect
-                  x={midX - pillW / 2}
-                  y={pillY}
-                  width={pillW}
-                  height={16}
-                  rx={6}
-                  fill={st.pillBg}
-                  stroke={st.pillBorder}
-                  strokeWidth="1.2"
-                />
-                <text
-                  x={midX}
-                  y={pillY + 11.5}
-                  textAnchor="middle"
-                  fontSize="10.5"
-                  fontWeight="800"
-                  fill={st.text}
-                >
-                  {hop.label}
-                </text>
-              </g>
-            );
-          })}
+            {/* Start Tick */}
+            <line x1={startX} y1="81" x2={startX} y2="96" stroke="#14532d" strokeWidth="2.5" />
 
-          {/* Intermediate milestone numbers */}
-          {intermediateTicks.map((tick, idx) => (
-            <text
-              key={idx}
-              x={tick.x}
-              y="125"
-              textAnchor="middle"
-              fontSize="10.5"
-              fontWeight="800"
-              fill={tick.color}
+            {plan.hops.map((hop, idx) => {
+              const x1 = startX + idx * stepX;
+              const x2 = startX + (idx + 1) * stepX;
+              const midX = (x1 + x2) / 2;
+              const st = HOP_STYLE[hop.kind];
+              const isHighlighted = activeHopIdx === idx;
+              const apexY = (85 + st.peakY) / 2;
+              const pillW = Math.max(26, hop.label.length * 6.8 + 10);
+              const pillY = Math.max(2, apexY - 17);
+              const isDashed = plan.hasDivisionEllipsis && idx === plan.hops.length - 1;
+              const tickColor =
+                checkResult && !isDashed
+                  ? checkResult.tickValid[idx]
+                    ? '#16a34a'
+                    : '#dc2626'
+                  : idx === plan.hops.length - 1 && !plan.isDivisionCountMode
+                    ? '#d97706'
+                    : '#475569';
+
+              return (
+                <g key={idx}>
+                  <path
+                    d={`M ${x1} 85 Q ${midX} ${st.peakY} ${x2} 85`}
+                    fill="none"
+                    stroke={st.stroke}
+                    strokeWidth={isHighlighted ? '4' : '2.8'}
+                    strokeDasharray={isDashed ? '4 3' : undefined}
+                    opacity={activeHopIdx === null || isHighlighted ? 1 : 0.72}
+                  />
+                  <line x1={x2} y1="81" x2={x2} y2="96" stroke={tickColor} strokeWidth="2.5" />
+                  <circle cx={x1} cy="88" r="3.8" fill={st.stroke} />
+                  <circle cx={x2} cy="88" r="4" fill={tickColor} />
+                  <rect
+                    x={midX - pillW / 2}
+                    y={pillY}
+                    width={pillW}
+                    height={16}
+                    rx={6}
+                    fill={st.pillBg}
+                    stroke={st.pillBorder}
+                    strokeWidth={isHighlighted ? '2' : '1.2'}
+                  />
+                  <text
+                    x={midX}
+                    y={pillY + 11.5}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fontWeight="800"
+                    fill={st.text}
+                  >
+                    {hop.label}
+                  </text>
+                </g>
+              );
+            })}
+
+            <circle cx={startX} cy="88" r="5.5" fill="#22c55e" stroke="#14532d" strokeWidth="2" />
+            <circle
+              cx={endX}
+              cy="88"
+              r="5.5"
+              fill={checkResult?.allCorrect ? '#22c55e' : '#facc15'}
+              stroke={checkResult?.allCorrect ? '#14532d' : '#92400e'}
+              strokeWidth="2"
+            />
+          </svg>
+
+          {/* Aligned Interactive Tick Input Boxes Directly Below the Number Line */}
+          <div className="relative mt-0.5 h-14 w-full">
+            {/* Fixed Start Number Pill */}
+            <div
+              className="absolute top-0 flex -translate-x-1/2 flex-col items-center"
+              style={{ left: `${(startX / 400) * 100}%` }}
             >
-              {tick.label}
-            </text>
-          ))}
+              <span
+                data-testid="numberline-start-val"
+                className="rounded-lg border-2 border-[#16a34a] bg-[#dcfce7] px-2 py-0.5 font-display text-xs font-bold text-[#14532d] tabular-nums"
+              >
+                {plan.startVal}
+              </span>
+              <span className="mt-0.5 text-[9px] font-extrabold text-[#15803d] uppercase">
+                Start
+              </span>
+            </div>
 
-          <circle cx={startX} cy="106" r="6" fill="#22c55e" stroke="#14532d" strokeWidth="2" />
-          <text x={startX} y="136" textAnchor="middle" fontSize="14" fontWeight="800" fill="#14532d">
-            {startLabel}
-          </text>
+            {/* Interactive Landing Number Inputs for Every Hop */}
+            {plan.hops.map((hop, idx) => {
+              const tickX = startX + (idx + 1) * stepX;
+              const isEllipsisEnd = plan.hasDivisionEllipsis && idx === plan.hops.length - 1;
+              const isFinalTarget = !plan.isDivisionCountMode && idx === plan.hops.length - 1;
+              const isChecked = checkResult !== null;
+              const isValid = checkResult?.tickValid[idx] ?? false;
 
-          <circle cx={endX} cy="106" r="6" fill="#facc15" stroke="#92400e" strokeWidth="2" />
-          <text x={endX} y="136" textAnchor="middle" fontSize="15" fontWeight="800" fill="#b45309">
-            {operation === 'div' ? String(a) : '?'}
-          </text>
-        </svg>
-        <p className="mt-1 text-center text-xs font-extrabold text-[#475569]">{subtitle}</p>
+              if (isEllipsisEnd) {
+                return (
+                  <div
+                    key={idx}
+                    className="absolute top-0 flex -translate-x-1/2 flex-col items-center"
+                    style={{ left: `${(tickX / 400) * 100}%` }}
+                  >
+                    <span className="rounded-lg border-2 border-[#f59e0b] bg-[#fef3c7] px-2 py-0.5 font-display text-xs font-bold text-[#78350f] tabular-nums">
+                      {hop.targetValue}
+                    </span>
+                    <span className="mt-0.5 text-[9px] font-extrabold text-[#92400e] uppercase">
+                      Target
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className="absolute top-0 flex -translate-x-1/2 flex-col items-center"
+                  style={{ left: `${(tickX / 400) * 100}%` }}
+                >
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    data-testid={`numberline-tick-input-${idx}`}
+                    aria-label={
+                      isFinalTarget
+                        ? 'Final answer below number line'
+                        : `Number below tick ${idx + 1}`
+                    }
+                    value={tickInputs[idx] ?? ''}
+                    onFocus={() => setActiveHopIdx(idx)}
+                    onChange={(e) => handleTickChange(idx, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCheck();
+                    }}
+                    placeholder="?"
+                    className={`h-8 rounded-lg border-2 px-1 text-center font-display font-bold tabular-nums focus:outline-none focus:ring-2 ${inputWidthClass} ${
+                      isChecked
+                        ? isValid
+                          ? 'border-[#16a34a] bg-[#dcfce7] text-[#14532d] focus:ring-[#4ade80]'
+                          : 'border-[#dc2626] bg-[#fee2e2] text-[#991b1b] focus:ring-[#f87171]'
+                        : isFinalTarget
+                          ? 'border-[#d97706] bg-[#fffbeb] text-[#78350f] focus:ring-[#fbbf24]'
+                          : 'border-[#0284c7] bg-white text-[#0f172a] focus:ring-[#38bdf8]'
+                    }`}
+                  />
+                  {isFinalTarget && (
+                    <span className="mt-0.5 text-[9px] font-extrabold text-[#b45309] uppercase">
+                      Answer
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        </div>
+
+        {/* Division: Extra "How many jumps?" box */}
+        {plan.isDivisionCountMode && (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2 rounded-xl border-2 border-[#f59e0b] bg-[#fffbeb] px-3 py-2">
+            <label
+              htmlFor="numberline-final-jumps"
+              className="text-xs font-extrabold text-[#78350f]"
+            >
+              How many total jumps of {problem.b} reach {problem.a}?
+            </label>
+            <input
+              id="numberline-final-jumps"
+              type="text"
+              inputMode="numeric"
+              data-testid="numberline-final-input"
+              value={finalJumpInput}
+              onChange={(e) => {
+                setFinalJumpInput(e.target.value.replace(/\D/g, '').slice(0, 6));
+                setCheckResult(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCheck();
+              }}
+              placeholder="?"
+              className={`h-8 w-20 rounded-lg border-2 px-2 text-center font-display text-sm font-bold tabular-nums focus:outline-none focus:ring-2 ${
+                checkResult
+                  ? checkResult.finalValid
+                    ? 'border-[#16a34a] bg-[#dcfce7] text-[#14532d] focus:ring-[#4ade80]'
+                    : 'border-[#dc2626] bg-[#fee2e2] text-[#991b1b] focus:ring-[#f87171]'
+                  : 'border-[#d97706] bg-white text-[#78350f] focus:ring-[#fbbf24]'
+              }`}
+            />
+          </div>
+        )}
+
+        <p className="mt-1.5 text-center text-xs font-extrabold text-[#475569]">{plan.subtitle}</p>
+      </div>
+
+      {/* Check & Submit Controls */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-testid="numberline-check-btn"
+          onClick={handleCheck}
+          className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#0369a1] bg-[#0ea5e9] px-3.5 py-2 font-display text-sm font-bold text-white shadow-[0_3px_0_#0369a1] hover:bg-[#0284c7] active:translate-y-0.5"
+        >
+          <Check className="h-4 w-4" />
+          Check Answer
+        </button>
+
+        {checkResult?.allCorrect && onSubmitAnswer && (
+          <button
+            type="button"
+            data-testid="numberline-submit-btn"
+            onClick={() => onSubmitAnswer(plan.expectedFinalAnswer)}
+            className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#15803d] bg-[#22c55e] px-3.5 py-2 font-display text-sm font-bold text-white shadow-[0_3px_0_#15803d] hover:bg-[#16a34a] active:translate-y-0.5"
+          >
+            Submit {plan.expectedFinalAnswer} ★
+          </button>
+        )}
+
+        {checkResult && (
+          <span
+            data-testid="numberline-feedback-msg"
+            className={`text-xs font-extrabold ${
+              checkResult.allCorrect ? 'text-[#15803d]' : 'text-[#b45309]'
+            }`}
+          >
+            {checkResult.message}
+          </span>
+        )}
       </div>
     </div>
   );
 };
 
-interface InteractiveBlock {
-  id: number;
-  value: 100 | 10 | 1;
-  crossed: boolean;
-  group: 'a' | 'b';
+/* --- Interactive Movable Base-10 Blocks Strategy --- */
+
+interface DragBlockState {
+  blockId: number | null;
+  spawnValue?: BlockValue;
+  spawnGroupSize?: number;
+  sourceZone: BlockZone | 'supply';
+  value: BlockValue;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  active: boolean;
+}
+
+const BlockVisual: React.FC<{
+  value: BlockValue;
   note?: string;
-}
-
-function buildBlocksForNumber(
-  n: number,
-  startId: number,
-  group: 'a' | 'b'
-): InteractiveBlock[] {
-  const pv = splitPlaceValues(n);
-  const items: InteractiveBlock[] = [];
-  let nextId = startId;
-  for (let i = 0; i < Math.min(pv.h, 4); i++) {
-    items.push({ id: nextId++, value: 100, crossed: false, group });
-  }
-  for (let i = 0; i < pv.t; i++) {
-    items.push({ id: nextId++, value: 10, crossed: false, group });
-  }
-  for (let i = 0; i < pv.o; i++) {
-    items.push({ id: nextId++, value: 1, crossed: false, group });
-  }
-  return items;
-}
-
-const BlockButton: React.FC<{
-  block: InteractiveBlock;
-  onToggle: (id: number) => void;
-}> = ({ block, onToggle }) => {
-  if (block.value === 100) {
+  dimmed?: boolean;
+}> = ({ value, note, dimmed = false }) => {
+  if (value === 100) {
     return (
-      <button
-        type="button"
-        onClick={() => onToggle(block.id)}
-        title="Click to cross out or restore 100 Flat"
+      <span
         className={`relative flex h-10 w-10 items-center justify-center rounded border-2 text-[10px] font-extrabold transition ${
-          block.crossed
-            ? 'border-[#fca5a5] bg-[#fee2e2] text-[#dc2626] line-through opacity-45'
-            : 'border-[#7e22ce] bg-[#e9d5ff] text-[#581c87] hover:scale-105'
+          dimmed
+            ? 'border-[#d8b4fe] bg-[#faf5ff] text-[#a855f7] opacity-35'
+            : 'border-[#7e22ce] bg-[#e9d5ff] text-[#581c87] shadow-xs'
         }`}
         style={
-          block.crossed
+          dimmed
             ? undefined
             : {
                 backgroundImage:
@@ -1146,24 +1324,21 @@ const BlockButton: React.FC<{
         }
       >
         100
-      </button>
+      </span>
     );
   }
-  if (block.value === 10) {
+  if (value === 10) {
     return (
-      <button
-        type="button"
-        onClick={() => onToggle(block.id)}
-        title={block.note ? `${block.note} — click to cross out or restore` : 'Click to cross out or restore 10 Rod'}
-        className={`relative h-10 w-3.5 rounded border transition ${
-          block.crossed
-            ? 'border-[#fca5a5] bg-[#fee2e2] opacity-45'
-            : block.note
-              ? 'border-[#15803d] bg-[#86efac] ring-2 ring-[#22c55e]/50 hover:scale-105'
-              : 'border-[#1d4ed8] bg-[#93c5fd] hover:scale-105'
+      <span
+        className={`relative block h-10 w-3.5 rounded border transition ${
+          dimmed
+            ? 'border-[#bfdbfe] bg-[#eff6ff] opacity-35'
+            : note
+              ? 'border-[#15803d] bg-[#86efac] ring-2 ring-[#22c55e]/50 shadow-xs'
+              : 'border-[#1d4ed8] bg-[#93c5fd] shadow-xs'
         }`}
         style={
-          block.crossed
+          dimmed
             ? undefined
             : {
                 backgroundImage: 'linear-gradient(rgba(30,58,138,0.22) 1px, transparent 1px)',
@@ -1174,253 +1349,441 @@ const BlockButton: React.FC<{
     );
   }
   return (
-    <button
-      type="button"
-      onClick={() => onToggle(block.id)}
-      title="Click to cross out or restore 1 Cube"
-      className={`h-4 w-4 rounded-sm border transition ${
-        block.crossed
-          ? 'border-[#fca5a5] bg-[#fee2e2] opacity-45'
-          : 'border-[#b45309] bg-[#fde047] shadow-[inset_0_-1px_0_rgba(180,83,9,0.35)] hover:scale-110'
+    <span
+      className={`block h-4.5 w-4.5 rounded-sm border transition ${
+        dimmed
+          ? 'border-[#fde68a] bg-[#fefce8] opacity-35'
+          : note
+            ? 'border-[#c2410c] bg-[#fed7aa] ring-1 ring-[#fb923c]'
+            : 'border-[#b45309] bg-[#fde047] shadow-[inset_0_-1px_0_rgba(180,83,9,0.35)]'
       }`}
     />
   );
 };
+
+const DraggableBlockButton: React.FC<{
+  block: MovableBlock;
+  isDraggingThis: boolean;
+  hintText: string;
+  onStartPointer: (e: React.PointerEvent<HTMLButtonElement>, block: MovableBlock) => void;
+}> = ({ block, isDraggingThis, hintText, onStartPointer }) => (
+  <button
+    type="button"
+    data-testid={`movable-block-${block.id}`}
+    data-block-value={block.value}
+    data-block-zone={block.zone}
+    aria-label={`${block.value} block in ${block.zone} (${hintText})`}
+    title={hintText}
+    onPointerDown={(e) => onStartPointer(e, block)}
+    className="cursor-grab touch-none rounded p-0.5 transition hover:scale-105 active:cursor-grabbing focus:outline-none focus:ring-2 focus:ring-[#f59e0b]"
+  >
+    <BlockVisual value={block.value} note={block.note} dimmed={isDraggingThis} />
+  </button>
+);
 
 const BaseBlocksView: React.FC<{
   problem: MathProblem;
   onSubmitAnswer?: (val: number) => void;
 }> = ({ problem, onSubmitAnswer }) => {
   const nextIdRef = useRef(1);
-  const makeInitial = () => {
-    nextIdRef.current = 1;
-    const base = buildBlocksForNumber(problem.a, 1, 'a');
-    nextIdRef.current = base.length + 1;
-    if (problem.operation === 'add') {
-      const extra = buildBlocksForNumber(problem.b, nextIdRef.current, 'b');
-      nextIdRef.current += extra.length;
-      return [...base, ...extra];
-    }
-    return base;
-  };
+  const initData = useMemo(() => buildInitialBlocksForProblem(problem), [problem]);
 
-  const [blocks, setBlocks] = useState<InteractiveBlock[]>(makeInitial);
-  const [targetTray, setTargetTray] = useState<'a' | 'b'>('a');
-  const [checkMsg, setCheckMsg] = useState<string | null>(null);
+  const [blocks, setBlocks] = useState<MovableBlock[]>(() => {
+    nextIdRef.current = initData.nextId;
+    return initData.blocks;
+  });
+  const [bankedGroups, setBankedGroups] = useState<MovableBlock[][]>([]);
+  const [dragState, setDragState] = useState<DragBlockState | null>(null);
+  const dragRef = useRef<DragBlockState | null>(null);
+  const [hoverZone, setHoverZone] = useState<string | null>(null);
+  const [checkFeedback, setCheckFeedback] = useState<{
+    correct: boolean;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
-    setBlocks(makeInitial());
-    setTargetTray('a');
-    setCheckMsg(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [problem.id]);
+    nextIdRef.current = initData.nextId;
+    setBlocks(initData.blocks);
+    setBankedGroups([]);
+    dragRef.current = null;
+    setDragState(null);
+    setHoverZone(null);
+    setCheckFeedback(null);
+  }, [problem.id, initData]);
 
-  // Separate Set 2 display blocks for sub/mul/div so both numbers are always visibly distinct
-  const referenceSetB = useMemo(
-    () => buildBlocksForNumber(problem.b, 9000, 'b'),
-    [problem.b]
-  );
+  const isLargeStarlight = initData.isLargeStarlight;
+  const op = problem.operation;
 
-  const addBlock = (value: 100 | 10 | 1) => {
-    setCheckMsg(null);
-    const group: 'a' | 'b' = problem.operation === 'add' ? targetTray : 'a';
-    setBlocks((prev) => [...prev, { id: nextIdRef.current++, value, crossed: false, group }]);
+  const getDefaultTapDestination = (block: MovableBlock): BlockZone | 'remove' => {
+    if (op === 'add') {
+      if (block.zone === 'mat') return block.originSet ?? 'set1';
+      return 'mat';
+    }
+    if (op === 'sub') {
+      return block.zone === 'set1' ? 'takeaway' : 'set1';
+    }
+    if (op === 'div') {
+      return block.zone === 'set1' ? 'groupbin' : 'set1';
+    }
+    // mul: tapping a block on the mat removes it
+    return block.zone === 'mat' ? 'remove' : 'mat';
   };
 
-  const toggleCross = (id: number) => {
-    setCheckMsg(null);
-    setBlocks((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, crossed: !b.crossed } : b))
-    );
-  };
+  const applyZoneMove = (
+    blockId: number,
+    targetZone: BlockZone | 'supply'
+  ) => {
+    setCheckFeedback(null);
+    if (targetZone === 'supply') {
+      setBlocks((prev) => prev.filter((b) => b.id !== blockId));
+      return;
+    }
 
-  const activeBlocks = blocks.filter((b) => !b.crossed);
-  const activeHundreds = activeBlocks.filter((b) => b.value === 100).length;
-  const activeTens = activeBlocks.filter((b) => b.value === 10).length;
-  const activeOnes = activeBlocks.filter((b) => b.value === 1).length;
-  const activeTotal = activeBlocks.reduce((sum, b) => sum + b.value, 0);
-
-  const blocksA = blocks.filter((b) => b.group === 'a');
-  const blocksB = problem.operation === 'add' ? blocks.filter((b) => b.group === 'b') : referenceSetB;
-  const activeTotalA = blocksA.filter((b) => !b.crossed).reduce((s, b) => s + b.value, 0);
-  const activeTotalB =
-    problem.operation === 'add'
-      ? blocksB.filter((b) => !b.crossed).reduce((s, b) => s + b.value, 0)
-      : problem.b;
-  const crossedTotalA = blocksA.filter((b) => b.crossed).reduce((s, b) => s + b.value, 0);
-
-  const handleBreakTenToOnes = () => {
-    setCheckMsg(null);
     setBlocks((prev) => {
-      // Prefer breaking a Ten inside the selected tray first
-      let idx = prev.findIndex((b) => !b.crossed && b.value === 10 && b.group === targetTray);
-      if (idx === -1) {
-        idx = prev.findIndex((b) => !b.crossed && b.value === 10);
+      const next = moveBlockToZone(prev, blockId, targetZone);
+      if (op === 'div' && targetZone === 'groupbin') {
+        const binSum = sumZoneValue(next, 'groupbin');
+        if (binSum === problem.b && problem.b > 0) {
+          const groupPieces = next.filter((b) => b.zone === 'groupbin');
+          setBankedGroups((groups) => [...groups, groupPieces]);
+          return next.filter((b) => b.zone !== 'groupbin');
+        }
       }
-      if (idx === -1) return prev;
-      const targetGroup = prev[idx].group;
-      const copy = [...prev];
-      copy.splice(idx, 1);
-      for (let i = 0; i < 10; i++) {
-        copy.push({
-          id: nextIdRef.current++,
-          value: 1,
-          crossed: false,
-          group: targetGroup,
-          note: 'Broken from 10',
+      return next;
+    });
+  };
+
+  const spawnIntoZone = (value: BlockValue, targetZone: BlockZone) => {
+    setCheckFeedback(null);
+    setBlocks((prev) => [
+      ...prev,
+      { id: nextIdRef.current++, value, zone: targetZone, originSet: 'set1' },
+    ]);
+  };
+
+  const spawnGroupBundleIntoZone = (groupSize: number, targetZone: BlockZone) => {
+    setCheckFeedback(null);
+    setBlocks((prev) => {
+      const res = decomposeToBlocks(groupSize, nextIdRef.current, targetZone, 'set1');
+      nextIdRef.current = res.nextId;
+      return [...prev, ...res.blocks];
+    });
+  };
+
+  const isPointerTracking = dragState !== null;
+
+  // Pointer drag-and-drop listeners (mounted once per drag gesture)
+  useEffect(() => {
+    if (!isPointerTracking) return;
+
+    const handleMove = (e: PointerEvent) => {
+      const curr = dragRef.current;
+      if (!curr) return;
+      const dist = Math.hypot(e.clientX - curr.startX, e.clientY - curr.startY);
+      const active = curr.active || dist >= 5;
+      const updated: DragBlockState = { ...curr, x: e.clientX, y: e.clientY, active };
+      dragRef.current = updated;
+      setDragState(updated);
+
+      if (active) {
+        const hit = document
+          .elementsFromPoint(e.clientX, e.clientY)
+          .find((el) => el.hasAttribute('data-dropzone'));
+        setHoverZone(hit ? hit.getAttribute('data-dropzone') : null);
+      }
+    };
+
+    const handleUp = (e: PointerEvent) => {
+      const curr = dragRef.current;
+      dragRef.current = null;
+      setDragState(null);
+      setHoverZone(null);
+      if (!curr) return;
+
+      const dist = Math.hypot(e.clientX - curr.startX, e.clientY - curr.startY);
+      const wasDrag = curr.active || dist >= 5;
+      const hit = document
+        .elementsFromPoint(e.clientX, e.clientY)
+        .find((el) => el.hasAttribute('data-dropzone'));
+      const dropTarget = hit?.getAttribute('data-dropzone') as BlockZone | 'supply' | null;
+
+      if (curr.blockId !== null) {
+        const movedBlock = blocks.find((b) => b.id === curr.blockId);
+        if (movedBlock) {
+          if (!wasDrag) {
+            const tapTarget = getDefaultTapDestination(movedBlock);
+            applyZoneMove(movedBlock.id, tapTarget === 'remove' ? 'supply' : tapTarget);
+          } else if (dropTarget && dropTarget !== curr.sourceZone) {
+            applyZoneMove(movedBlock.id, dropTarget);
+          }
+        }
+      } else if (curr.sourceZone === 'supply') {
+        if (!wasDrag || dropTarget === 'mat') {
+          if (curr.spawnGroupSize !== undefined) {
+            spawnGroupBundleIntoZone(curr.spawnGroupSize, 'mat');
+          } else if (curr.spawnValue) {
+            spawnIntoZone(curr.spawnValue, 'mat');
+          }
+        }
+      }
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPointerTracking, blocks, op, problem.b]);
+
+  const startBlockPointer = (e: React.PointerEvent<HTMLButtonElement>, block: MovableBlock) => {
+    e.preventDefault();
+    const init: DragBlockState = {
+      blockId: block.id,
+      sourceZone: block.zone,
+      value: block.value,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
+      active: false,
+    };
+    dragRef.current = init;
+    setDragState(init);
+  };
+
+  const startSupplyPointer = (
+    e: React.PointerEvent<HTMLButtonElement>,
+    value: BlockValue,
+    groupSize?: number
+  ) => {
+    e.preventDefault();
+    const init: DragBlockState = {
+      blockId: null,
+      spawnValue: value,
+      spawnGroupSize: groupSize,
+      sourceZone: 'supply',
+      value,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
+      active: false,
+    };
+    dragRef.current = init;
+    setDragState(init);
+  };
+
+  const handleReset = () => {
+    nextIdRef.current = initData.nextId;
+    setBlocks(initData.blocks);
+    setBankedGroups([]);
+    dragRef.current = null;
+    setDragState(null);
+    setHoverZone(null);
+    setCheckFeedback(null);
+  };
+
+  const activeHoverZone = dragState?.active ? hoverZone : null;
+
+  // Zone summaries
+  const activeRegroupZone: BlockZone =
+    op === 'sub' || op === 'div' ? 'set1' : op === 'mul' ? 'mat' : 'mat';
+  const regroupCounts = countZoneByValue(blocks, activeRegroupZone);
+  // In Addition, allow Break/Trade on whichever zone holds blocks (prefer Mat if non-empty, else Set 1)
+  const addEffectiveZone: BlockZone =
+    op === 'add' && sumZoneValue(blocks, 'mat') === 0
+      ? sumZoneValue(blocks, 'set1') > 0
+        ? 'set1'
+        : 'set2'
+      : activeRegroupZone;
+  const effectiveCounts =
+    op === 'add' ? countZoneByValue(blocks, addEffectiveZone) : regroupCounts;
+
+  const handleBreakBlock = (fromValue: 100 | 10) => {
+    setCheckFeedback(null);
+    setBlocks((prev) => {
+      const res = breakBlockInZone(prev, addEffectiveZone, fromValue, nextIdRef.current);
+      nextIdRef.current = res.nextId;
+      return res.blocks;
+    });
+  };
+
+  const handleTradeOnes = () => {
+    setCheckFeedback(null);
+    setBlocks((prev) => {
+      const res = tradeBlocksInZone(prev, addEffectiveZone, 1, nextIdRef.current);
+      nextIdRef.current = res.nextId;
+      return res.blocks;
+    });
+  };
+
+  const set1Blocks = blocks.filter((b) => b.zone === 'set1');
+  const set2Blocks = blocks.filter((b) => b.zone === 'set2');
+  const matBlocks = blocks.filter((b) => b.zone === 'mat');
+  const takeawayBlocks = blocks.filter((b) => b.zone === 'takeaway');
+  const groupBinBlocks = blocks.filter((b) => b.zone === 'groupbin');
+
+  const set1Total = sumZoneValue(blocks, 'set1');
+  const set2Total = sumZoneValue(blocks, 'set2');
+  const matTotal = sumZoneValue(blocks, 'mat');
+  const takeawayTotal = sumZoneValue(blocks, 'takeaway');
+  const groupBinTotal = sumZoneValue(blocks, 'groupbin');
+
+  const handleUndoBankedGroup = () => {
+    setCheckFeedback(null);
+    setBankedGroups((prev) => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      setBlocks((bPrev) => [
+        ...bPrev,
+        ...last.map((item) => ({ ...item, zone: 'set1' as const })),
+      ]);
+      return prev.slice(0, -1);
+    });
+  };
+
+  const handleCheckBlocks = () => {
+    if (isLargeStarlight) {
+      setCheckFeedback({
+        correct: false,
+        message: 'Starlight numbers are over 999—use Vertical Alignment or Number Line to solve!',
+      });
+      return;
+    }
+
+    if (op === 'add') {
+      if (matTotal === problem.answer && set1Blocks.length === 0 && set2Blocks.length === 0) {
+        setCheckFeedback({
+          correct: true,
+          message: `Awesome! You moved both sets onto the Answer Mat to make ${matTotal}!`,
+        });
+      } else if (matTotal === problem.answer) {
+        setCheckFeedback({
+          correct: true,
+          message: `Awesome! Your Answer Mat makes ${matTotal}!`,
+        });
+      } else if (set1Blocks.length > 0 || set2Blocks.length > 0) {
+        setCheckFeedback({
+          correct: false,
+          message: `Answer Mat has ${matTotal}. Keep moving blocks from Set 1 & Set 2 onto the Mat!`,
+        });
+      } else {
+        setCheckFeedback({
+          correct: false,
+          message: `Your Answer Mat totals ${matTotal}, not ${problem.answer}. Adjust the blocks!`,
         });
       }
-      return copy;
-    });
+      return;
+    }
+
+    if (op === 'sub') {
+      if (takeawayTotal === problem.b && set1Total === problem.answer) {
+        setCheckFeedback({
+          correct: true,
+          message: `Awesome! You took away ${problem.b}, leaving ${set1Total}!`,
+        });
+      } else if (takeawayTotal < problem.b) {
+        setCheckFeedback({
+          correct: false,
+          message: `You moved ${takeawayTotal} into Take Away—move ${problem.b - takeawayTotal} more from Start With!`,
+        });
+      } else {
+        setCheckFeedback({
+          correct: false,
+          message: `Take Away has ${takeawayTotal} (needs ${problem.b}). Drag ${takeawayTotal - problem.b} back to Start With!`,
+        });
+      }
+      return;
+    }
+
+    if (op === 'mul') {
+      if (matTotal === problem.answer) {
+        setCheckFeedback({
+          correct: true,
+          message: `Awesome! Your ${problem.a} groups of ${problem.b} make ${matTotal}!`,
+        });
+      } else {
+        setCheckFeedback({
+          correct: false,
+          message: `Answer Mat currently has ${matTotal}. Build ${problem.a} groups of ${problem.b}!`,
+        });
+      }
+      return;
+    }
+
+    // Division
+    if (
+      set1Blocks.length === 0 &&
+      groupBinBlocks.length === 0 &&
+      bankedGroups.length === problem.answer
+    ) {
+      setCheckFeedback({
+        correct: true,
+        message: `Awesome! ${problem.a} splits evenly into ${bankedGroups.length} groups of ${problem.b}!`,
+      });
+    } else {
+      setCheckFeedback({
+        correct: false,
+        message: `${bankedGroups.length} group(s) made so far, with ${set1Total + groupBinTotal} still ungrouped!`,
+      });
+    }
   };
-
-  const handleTradeOnesToTen = () => {
-    setCheckMsg(null);
-    setBlocks((prev) => {
-      const activeOneBlocks = prev.filter((b) => !b.crossed && b.value === 1);
-      if (activeOneBlocks.length < 10) return prev;
-      const picked = activeOneBlocks.slice(0, 10);
-      const idSet = new Set(picked.map((b) => b.id));
-      const destGroup: 'a' | 'b' = problem.operation === 'add' ? 'a' : picked[0].group;
-      return [
-        ...prev.filter((b) => !idSet.has(b.id)),
-        {
-          id: nextIdRef.current++,
-          value: 10,
-          crossed: false,
-          group: destGroup,
-          note: 'Traded 10 Ones',
-        },
-      ];
-    });
-  };
-
-  const set1Title =
-    problem.operation === 'add'
-      ? `Set 1 · Number ${problem.a}`
-      : problem.operation === 'sub'
-        ? `Set 1 · Start With ${problem.a}`
-        : problem.operation === 'mul'
-          ? `Set 1 · Groups (${problem.a})`
-          : `Set 1 · Total (${problem.a})`;
-
-  const set2Title =
-    problem.operation === 'add'
-      ? `Set 2 · Number ${problem.b}`
-      : problem.operation === 'sub'
-        ? `Set 2 · Take Away ${problem.b}`
-        : problem.operation === 'mul'
-          ? `Set 2 · Size (${problem.b})`
-          : `Set 2 · Group Size (${problem.b})`;
 
   return (
-    <div data-testid="interactive-base-blocks">
+    <div data-testid="interactive-base-blocks" className="relative">
+      {/* Header Row */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-extrabold tracking-wide text-[#78350f] uppercase">
-          Interactive Base-10 Blocks
+          Movable Base-10 Blocks
         </span>
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            data-testid="blocks-reset-btn"
-            onClick={() => {
-              setBlocks(makeInitial());
-              setCheckMsg(null);
-            }}
-            className="rounded-lg border border-[#d6be9b] bg-[#fcf7ec] px-2 py-0.5 text-[11px] font-extrabold text-[#78532a] hover:bg-[#fef3c7]"
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            data-testid="blocks-clear-btn"
-            onClick={() => {
-              setBlocks([]);
-              setCheckMsg(null);
-            }}
-            className="rounded-lg border border-[#fca5a5] bg-[#fef2f2] px-2 py-0.5 text-[11px] font-extrabold text-[#b91c1c] hover:bg-[#fee2e2]"
-          >
-            Clear
-          </button>
-        </div>
-      </div>
-
-      {/* Add Blocks Row */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5 rounded-xl border border-[#e7d8c0] bg-[#fcf7ec] px-2.5 py-1.5">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-extrabold tracking-wide text-[#78532a] uppercase">
-            Add:
+          <span className="text-[10px] font-extrabold text-[#78532a]">
+            Drag or tap blocks to move
           </span>
           <button
             type="button"
-            data-testid="blocks-add-100"
-            onClick={() => addBlock(100)}
-            className="rounded-lg border border-[#7e22ce] bg-[#f3e8ff] px-2 py-1 text-xs font-extrabold text-[#581c87] hover:bg-[#e9d5ff]"
+            data-testid="blocks-reset-btn"
+            onClick={handleReset}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#d6be9b] bg-[#fcf7ec] px-2 py-0.5 text-[11px] font-extrabold text-[#78532a] hover:bg-[#fef3c7]"
           >
-            +100 Flat
-          </button>
-          <button
-            type="button"
-            data-testid="blocks-add-10"
-            onClick={() => addBlock(10)}
-            className="rounded-lg border border-[#1d4ed8] bg-[#dbeafe] px-2 py-1 text-xs font-extrabold text-[#1e3a8a] hover:bg-[#bfdbfe]"
-          >
-            +10 Rod
-          </button>
-          <button
-            type="button"
-            data-testid="blocks-add-1"
-            onClick={() => addBlock(1)}
-            className="rounded-lg border border-[#b45309] bg-[#fef9c3] px-2 py-1 text-xs font-extrabold text-[#854d0e] hover:bg-[#fef08a]"
-          >
-            +1 Cube
+            <RotateCcw className="h-3 w-3" />
+            Reset
           </button>
         </div>
-        {problem.operation === 'add' && (
-          <div className="flex items-center gap-1 text-[10px] font-extrabold">
-            <span className="text-[#78532a]">Into:</span>
-            <button
-              type="button"
-              onClick={() => setTargetTray('a')}
-              className={`rounded-md border px-1.5 py-0.5 ${
-                targetTray === 'a'
-                  ? 'border-[#0284c7] bg-[#e0f2fe] text-[#0c4a6e]'
-                  : 'border-[#d6be9b] bg-white text-[#78532a]'
-              }`}
-            >
-              Set 1
-            </button>
-            <button
-              type="button"
-              onClick={() => setTargetTray('b')}
-              className={`rounded-md border px-1.5 py-0.5 ${
-                targetTray === 'b'
-                  ? 'border-[#16a34a] bg-[#dcfce7] text-[#14532d]'
-                  : 'border-[#d6be9b] bg-white text-[#78532a]'
-              }`}
-            >
-              Set 2
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Distinct Break vs Trade Action Cards */}
+      {isLargeStarlight && (
+        <div className="mb-2 rounded-xl border border-[#f59e0b] bg-[#fffbeb] px-2.5 py-1.5 text-[11px] font-extrabold text-[#92400e]">
+          Starlight numbers are over 999! Practice moving sample blocks below, or switch to Vertical Alignment / Number Line to solve.
+        </div>
+      )}
+
+      {/* Break & Trade Controls */}
       <div className="mb-2.5 grid grid-cols-2 gap-2">
         <button
           type="button"
           data-testid="blocks-break-ten"
-          disabled={activeTens < 1}
-          onClick={handleBreakTenToOnes}
-          className={`flex items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 text-left transition ${
-            activeTens >= 1
+          disabled={effectiveCounts.t < 1 && effectiveCounts.h < 1}
+          onClick={() =>
+            handleBreakBlock(effectiveCounts.t >= 1 ? 10 : 100)
+          }
+          className={`flex items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 text-left ${
+            effectiveCounts.t >= 1 || effectiveCounts.h >= 1
               ? 'border-[#ea580c] bg-[#fff7ed] text-[#9a3412] shadow-[0_2px_0_#ea580c] hover:bg-[#ffedd5] active:translate-y-0.5'
               : 'cursor-not-allowed border-[#e2e8f0] bg-[#f8fafc] text-[#94a3b8] opacity-75'
           }`}
         >
           <span
             aria-hidden="true"
-            className="flex shrink-0 items-center gap-0.5 rounded-md border border-[#fdba74] bg-white px-1 py-0.5"
+            className={`flex shrink-0 items-center gap-0.5 rounded-md border bg-white px-1 py-0.5 ${
+              effectiveCounts.t >= 1 || effectiveCounts.h >= 1
+                ? 'border-[#fdba74]'
+                : 'border-[#cbd5e1]'
+            }`}
           >
             <span className="h-3.5 w-1.5 rounded-xs bg-[#3b82f6]" />
             <span className="text-[9px] font-black text-[#ea580c]">→</span>
@@ -1432,9 +1795,17 @@ const BaseBlocksView: React.FC<{
             </span>
           </span>
           <span className="min-w-0 leading-tight">
-            <span className="block whitespace-nowrap text-[10.5px] font-extrabold">Break 10 → 10 Ones</span>
+            <span className="block whitespace-nowrap text-[10.5px] font-extrabold">
+              {effectiveCounts.t >= 1 || effectiveCounts.h === 0
+                ? 'Break 10 → 10 Ones'
+                : 'Break 100 → 10 Tens'}
+            </span>
             <span className="block text-[9.5px] font-bold opacity-85">
-              {activeTens >= 1 ? 'Unpack 1 rod to borrow' : 'Need 1+ Ten rod'}
+              {effectiveCounts.t >= 1
+                ? 'Unpack 1 rod to borrow'
+                : effectiveCounts.h >= 1
+                  ? 'Unpack 1 flat into tens'
+                  : 'Need 1+ Ten or Flat'}
             </span>
           </span>
         </button>
@@ -1442,17 +1813,19 @@ const BaseBlocksView: React.FC<{
         <button
           type="button"
           data-testid="blocks-trade-ones"
-          disabled={activeOnes < 10}
-          onClick={handleTradeOnesToTen}
-          className={`flex items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 text-left transition ${
-            activeOnes >= 10
+          disabled={effectiveCounts.o < 10}
+          onClick={handleTradeOnes}
+          className={`flex items-center gap-1.5 rounded-xl border-2 px-2 py-1.5 text-left ${
+            effectiveCounts.o >= 10
               ? 'border-[#16a34a] bg-[#f0fdf4] text-[#166534] shadow-[0_2px_0_#16a34a] hover:bg-[#dcfce7] active:translate-y-0.5'
               : 'cursor-not-allowed border-[#e2e8f0] bg-[#f8fafc] text-[#94a3b8] opacity-75'
           }`}
         >
           <span
             aria-hidden="true"
-            className="flex shrink-0 items-center gap-0.5 rounded-md border border-[#86efac] bg-white px-1 py-0.5"
+            className={`flex shrink-0 items-center gap-0.5 rounded-md border bg-white px-1 py-0.5 ${
+              effectiveCounts.o >= 10 ? 'border-[#86efac]' : 'border-[#cbd5e1]'
+            }`}
           >
             <span className="grid grid-cols-2 gap-0.5">
               <span className="h-1.5 w-1.5 rounded-xs bg-[#facc15]" />
@@ -1464,142 +1837,470 @@ const BaseBlocksView: React.FC<{
             <span className="h-3.5 w-1.5 rounded-xs bg-[#22c55e]" />
           </span>
           <span className="min-w-0 leading-tight">
-            <span className="block whitespace-nowrap text-[10.5px] font-extrabold">Trade 10 Ones → 10</span>
+            <span className="block whitespace-nowrap text-[10.5px] font-extrabold">
+              Trade 10 Ones → 10
+            </span>
             <span className="block text-[9.5px] font-bold opacity-85">
-              {activeOnes >= 10
+              {effectiveCounts.o >= 10
                 ? 'Bundle 10 cubes to carry'
-                : `Need ${10 - activeOnes} more Ones`}
+                : `Need ${10 - effectiveCounts.o} more Ones`}
             </span>
           </span>
         </button>
       </div>
 
-      {/* Two Separated Sets of Blocks Representing Both Numbers */}
-      <div className="space-y-2 rounded-2xl border-2 border-[#cbd5e1] bg-[#fffef8] p-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] font-extrabold text-[#3f2208]">
-          <span>Tap any block to cross out / restore</span>
-          <span
-            data-testid="blocks-active-total"
-            className="rounded-lg bg-[#fef3c7] px-2 py-0.5 text-[#92400e] tabular-nums"
-          >
-            Active Total: {activeTotal} ({activeHundreds}×100, {activeTens}×10, {activeOnes}×1)
-          </span>
-        </div>
+      {/* ADDITION: Two Source Sets -> Combined Answer Mat */}
+      {op === 'add' && (
+        <div className="space-y-2.5">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div
+              data-dropzone="set1"
+              data-testid="blocks-set-1"
+              className={`rounded-xl border-2 p-2.5 transition ${
+                activeHoverZone === 'set1'
+                  ? 'border-[#0284c7] bg-[#e0f2fe] ring-2 ring-[#38bdf8]'
+                  : 'border-[#7dd3fc] bg-[#f0f9ff]'
+              }`}
+            >
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-[#0c4a6e]">
+                  Set 1 · {problem.a}
+                </span>
+                <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#0369a1] tabular-nums">
+                  {set1Total}
+                </span>
+              </div>
+              <div className="flex min-h-[48px] flex-wrap items-end gap-1">
+                {set1Blocks.map((b) => (
+                  <DraggableBlockButton
+                    key={b.id}
+                    block={b}
+                    isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                    hintText="Drag or tap to move onto Answer Mat"
+                    onStartPointer={startBlockPointer}
+                  />
+                ))}
+                {set1Blocks.length === 0 && (
+                  <span className="text-[11px] font-bold text-[#0369a1]">Moved to Mat ✓</span>
+                )}
+              </div>
+            </div>
 
-        <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
-          {/* Set 1 Tray */}
+            <div
+              data-dropzone="set2"
+              data-testid="blocks-set-2"
+              className={`rounded-xl border-2 p-2.5 transition ${
+                activeHoverZone === 'set2'
+                  ? 'border-[#16a34a] bg-[#dcfce7] ring-2 ring-[#4ade80]'
+                  : 'border-[#86efac] bg-[#f0fdf4]'
+              }`}
+            >
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-[#14532d]">
+                  Set 2 · {problem.b}
+                </span>
+                <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#15803d] tabular-nums">
+                  {set2Total}
+                </span>
+              </div>
+              <div className="flex min-h-[48px] flex-wrap items-end gap-1">
+                {set2Blocks.map((b) => (
+                  <DraggableBlockButton
+                    key={b.id}
+                    block={b}
+                    isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                    hintText="Drag or tap to move onto Answer Mat"
+                    onStartPointer={startBlockPointer}
+                  />
+                ))}
+                {set2Blocks.length === 0 && (
+                  <span className="text-[11px] font-bold text-[#15803d]">Moved to Mat ✓</span>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div
-            data-testid="blocks-set-1"
-            className="rounded-xl border-2 border-[#7dd3fc] bg-[#f0f9ff] p-2.5"
+            data-dropzone="mat"
+            data-testid="blocks-answer-mat"
+            className={`rounded-2xl border-2 border-dashed p-3 transition ${
+              activeHoverZone === 'mat'
+                ? 'border-[#d97706] bg-[#fef3c7] ring-2 ring-[#f59e0b]'
+                : 'border-[#cbd5e1] bg-[#fffef8]'
+            }`}
           >
-            <div className="mb-1.5 flex items-center justify-between gap-1">
-              <span className="text-[11px] font-extrabold text-[#0c4a6e]">{set1Title}</span>
-              <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#0369a1] tabular-nums">
-                {activeTotalA}
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+              <span className="text-xs font-extrabold text-[#78350f]">
+                Combined Answer Mat (Drop blocks here)
+              </span>
+              <span
+                data-testid="blocks-active-total"
+                className="rounded-lg bg-[#fef3c7] px-2 py-0.5 text-[11px] font-extrabold text-[#92400e] tabular-nums"
+              >
+                Mat Total: {matTotal} ({countZoneByValue(blocks, 'mat').h}×100,{' '}
+                {countZoneByValue(blocks, 'mat').t}×10, {countZoneByValue(blocks, 'mat').o}×1)
               </span>
             </div>
             <div className="flex min-h-[56px] flex-wrap items-end gap-1.5">
-              {blocksA.map((b) => (
-                <BlockButton key={b.id} block={b} onToggle={toggleCross} />
+              {matBlocks.map((b) => (
+                <DraggableBlockButton
+                  key={b.id}
+                  block={b}
+                  isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                  hintText="Drag or tap to move back to original set"
+                  onStartPointer={startBlockPointer}
+                />
               ))}
-              {blocksA.length === 0 && (
-                <span className="text-[11px] font-bold text-[#64748b]">Empty Set 1</span>
+              {matBlocks.length === 0 && (
+                <span className="text-xs font-bold text-[#94a3b8]">
+                  Drag or tap blocks from Set 1 and Set 2 into this mat to add them together!
+                </span>
               )}
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Operator Badge Between Sets */}
-          <div className="flex items-center justify-center">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#d6be9b] bg-[#fef3c7] font-display text-base font-bold text-[#78350f]">
-              {problem.symbol}
-            </span>
-          </div>
-
-          {/* Set 2 Tray */}
+      {/* SUBTRACTION: Start With (a) -> Drag into Take Away (b) */}
+      {op === 'sub' && (
+        <div className="grid gap-2.5 sm:grid-cols-2">
           <div
-            data-testid="blocks-set-2"
-            className={`rounded-xl border-2 p-2.5 ${
-              problem.operation === 'add'
-                ? 'border-[#86efac] bg-[#f0fdf4]'
-                : 'border-[#fdba74] bg-[#fff7ed]'
+            data-dropzone="set1"
+            data-testid="blocks-set-1"
+            className={`rounded-2xl border-2 p-3 transition ${
+              activeHoverZone === 'set1'
+                ? 'border-[#0284c7] bg-[#e0f2fe] ring-2 ring-[#38bdf8]'
+                : 'border-[#7dd3fc] bg-[#f0f9ff]'
             }`}
           >
             <div className="mb-1.5 flex items-center justify-between gap-1">
-              <span
-                className={`text-[11px] font-extrabold ${
-                  problem.operation === 'add' ? 'text-[#14532d]' : 'text-[#9a3412]'
-                }`}
-              >
-                {set2Title}
+              <span className="text-[11px] font-extrabold text-[#0c4a6e]">
+                Start With {problem.a} (Remaining)
               </span>
               <span
-                className={`rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums ${
-                  problem.operation === 'add' ? 'text-[#15803d]' : 'text-[#c2410c]'
-                }`}
+                data-testid="blocks-active-total"
+                className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#0369a1] tabular-nums"
               >
-                {problem.operation === 'sub'
-                  ? `Crossed: ${crossedTotalA}/${problem.b}`
-                  : activeTotalB}
+                Left: {set1Total}
               </span>
             </div>
-            <div className="flex min-h-[56px] flex-wrap items-end gap-1.5">
-              {problem.operation === 'add' ? (
-                blocksB.length > 0 ? (
-                  blocksB.map((b) => (
-                    <BlockButton key={b.id} block={b} onToggle={toggleCross} />
-                  ))
-                ) : (
-                  <span className="text-[11px] font-bold text-[#64748b]">Empty Set 2</span>
-                )
-              ) : (
-                blocksB.map((b) => (
-                  <span
-                    key={b.id}
-                    className="pointer-events-none opacity-85"
-                    aria-hidden="true"
-                  >
-                    <BlockButton block={b} onToggle={() => {}} />
-                  </span>
-                ))
+            <div className="flex min-h-[76px] flex-wrap items-end gap-1">
+              {set1Blocks.map((b) => (
+                <DraggableBlockButton
+                  key={b.id}
+                  block={b}
+                  isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                  hintText="Drag or tap to move into Take Away tray"
+                  onStartPointer={startBlockPointer}
+                />
+              ))}
+              {set1Blocks.length === 0 && (
+                <span className="text-[11px] font-bold text-[#64748b]">0 blocks remaining</span>
               )}
             </div>
-            {problem.operation === 'sub' && (
-              <p className="mt-1.5 text-[10px] font-bold text-[#9a3412]">
-                Cross out {problem.b} from Set 1 above!
-              </p>
+          </div>
+
+          <div
+            data-dropzone="takeaway"
+            data-testid="blocks-takeaway-tray"
+            className={`rounded-2xl border-2 border-dashed p-3 transition ${
+              activeHoverZone === 'takeaway'
+                ? 'border-[#ea580c] bg-[#ffedd5] ring-2 ring-[#fb923c]'
+                : takeawayTotal === problem.b
+                  ? 'border-[#16a34a] bg-[#f0fdf4]'
+                  : 'border-[#fdba74] bg-[#fff7ed]'
+            }`}
+          >
+            <div className="mb-1.5 flex items-center justify-between gap-1">
+              <span className="text-[11px] font-extrabold text-[#9a3412]">
+                Take Away {problem.b} (Drop here)
+              </span>
+              <span
+                data-testid="blocks-takeaway-total"
+                className={`rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums ${
+                  takeawayTotal === problem.b ? 'text-[#15803d]' : 'text-[#c2410c]'
+                }`}
+              >
+                {takeawayTotal} / {problem.b}
+              </span>
+            </div>
+            <div className="flex min-h-[76px] flex-wrap items-end gap-1">
+              {takeawayBlocks.map((b) => (
+                <DraggableBlockButton
+                  key={b.id}
+                  block={b}
+                  isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                  hintText="Drag or tap to return to Start With"
+                  onStartPointer={startBlockPointer}
+                />
+              ))}
+              {takeawayBlocks.length === 0 && (
+                <span className="text-[11px] font-bold text-[#9a3412]">
+                  Drag {problem.b} worth of blocks here from Start With!
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MULTIPLICATION: Draggable Supply + Group Bundle -> Answer Mat */}
+      {op === 'mul' && (
+        <div className="space-y-2.5">
+          <div
+            data-dropzone="supply"
+            data-testid="blocks-supply-tray"
+            className={`rounded-xl border-2 p-2.5 transition ${
+              activeHoverZone === 'supply'
+                ? 'border-[#dc2626] bg-[#fee2e2] ring-2 ring-[#f87171]'
+                : 'border-[#e7d8c0] bg-[#fcf7ec]'
+            }`}
+          >
+            <div className="mb-1.5 flex items-center justify-between text-[11px] font-extrabold text-[#78350f]">
+              <span>Block Supply (Drag onto Answer Mat, or drag back here to remove)</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {problem.b > 0 && problem.b <= 99 && (
+                <button
+                  type="button"
+                  data-testid="blocks-add-group"
+                  onPointerDown={(e) => startSupplyPointer(e, 10, problem.b)}
+                  className="cursor-grab touch-none rounded-xl border-2 border-[#d97706] bg-[#fef3c7] px-2.5 py-1 text-xs font-extrabold text-[#92400e] shadow-xs hover:bg-[#fde68a] active:cursor-grabbing"
+                >
+                  + Group of {problem.b}
+                </button>
+              )}
+              <button
+                type="button"
+                data-testid="blocks-add-100"
+                onPointerDown={(e) => startSupplyPointer(e, 100)}
+                className="cursor-grab touch-none rounded-lg border border-[#7e22ce] bg-[#f3e8ff] px-2 py-1 text-xs font-extrabold text-[#581c87] hover:bg-[#e9d5ff] active:cursor-grabbing"
+              >
+                +100 Flat
+              </button>
+              <button
+                type="button"
+                data-testid="blocks-add-10"
+                onPointerDown={(e) => startSupplyPointer(e, 10)}
+                className="cursor-grab touch-none rounded-lg border border-[#1d4ed8] bg-[#dbeafe] px-2 py-1 text-xs font-extrabold text-[#1e3a8a] hover:bg-[#bfdbfe] active:cursor-grabbing"
+              >
+                +10 Rod
+              </button>
+              <button
+                type="button"
+                data-testid="blocks-add-1"
+                onPointerDown={(e) => startSupplyPointer(e, 1)}
+                className="cursor-grab touch-none rounded-lg border border-[#b45309] bg-[#fef9c3] px-2 py-1 text-xs font-extrabold text-[#854d0e] hover:bg-[#fef08a] active:cursor-grabbing"
+              >
+                +1 Cube
+              </button>
+            </div>
+          </div>
+
+          <div
+            data-dropzone="mat"
+            data-testid="blocks-answer-mat"
+            className={`rounded-2xl border-2 border-dashed p-3 transition ${
+              activeHoverZone === 'mat'
+                ? 'border-[#d97706] bg-[#fef3c7] ring-2 ring-[#f59e0b]'
+                : 'border-[#cbd5e1] bg-[#fffef8]'
+            }`}
+          >
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+              <span className="text-xs font-extrabold text-[#78350f]">
+                Answer Mat · Build {problem.a} × {problem.b}
+              </span>
+              <span
+                data-testid="blocks-active-total"
+                className="rounded-lg bg-[#fef3c7] px-2 py-0.5 text-[11px] font-extrabold text-[#92400e] tabular-nums"
+              >
+                Mat Total: {matTotal}
+              </span>
+            </div>
+            <div className="flex min-h-[64px] flex-wrap items-end gap-1.5">
+              {matBlocks.map((b) => (
+                <DraggableBlockButton
+                  key={b.id}
+                  block={b}
+                  isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                  hintText="Drag back to supply or tap to remove"
+                  onStartPointer={startBlockPointer}
+                />
+              ))}
+              {matBlocks.length === 0 && (
+                <span className="text-xs font-bold text-[#94a3b8]">
+                  Drag "+ Group of {problem.b}" or individual blocks here to build {problem.a} ×{' '}
+                  {problem.b}!
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DIVISION: Total Pile (a) -> Equal Groups of (b) */}
+      {op === 'div' && (
+        <div className="space-y-2.5">
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <div
+              data-dropzone="set1"
+              data-testid="blocks-set-1"
+              className={`rounded-2xl border-2 p-3 transition ${
+                activeHoverZone === 'set1'
+                  ? 'border-[#0284c7] bg-[#e0f2fe] ring-2 ring-[#38bdf8]'
+                  : 'border-[#7dd3fc] bg-[#f0f9ff]'
+              }`}
+            >
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-[#0c4a6e]">
+                  Total Pile · {problem.a}
+                </span>
+                <span
+                  data-testid="blocks-active-total"
+                  className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#0369a1] tabular-nums"
+                >
+                  Left: {set1Total}
+                </span>
+              </div>
+              <div className="flex min-h-[68px] flex-wrap items-end gap-1">
+                {set1Blocks.map((b) => (
+                  <DraggableBlockButton
+                    key={b.id}
+                    block={b}
+                    isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                    hintText="Drag or tap to move into Group Builder"
+                    onStartPointer={startBlockPointer}
+                  />
+                ))}
+                {set1Blocks.length === 0 && (
+                  <span className="text-[11px] font-bold text-[#15803d]">All blocks grouped ✓</span>
+                )}
+              </div>
+            </div>
+
+            <div
+              data-dropzone="groupbin"
+              data-testid="blocks-group-bin"
+              className={`rounded-2xl border-2 border-dashed p-3 transition ${
+                activeHoverZone === 'groupbin'
+                  ? 'border-[#9333ea] bg-[#f3e8ff] ring-2 ring-[#c084fc]'
+                  : groupBinTotal > problem.b
+                    ? 'border-[#dc2626] bg-[#fef2f2]'
+                    : 'border-[#c084fc] bg-[#faf5ff]'
+              }`}
+            >
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[11px] font-extrabold text-[#6b21a8]">
+                  Group of {problem.b} Builder
+                </span>
+                <span className="rounded-md bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#7e22ce] tabular-nums">
+                  {groupBinTotal} / {problem.b}
+                </span>
+              </div>
+              <div className="flex min-h-[68px] flex-wrap items-end gap-1">
+                {groupBinBlocks.map((b) => (
+                  <DraggableBlockButton
+                    key={b.id}
+                    block={b}
+                    isDraggingThis={dragState?.active === true && dragState.blockId === b.id}
+                    hintText="Drag or tap to return to Total Pile"
+                    onStartPointer={startBlockPointer}
+                  />
+                ))}
+                {groupBinBlocks.length === 0 && (
+                  <span className="text-[11px] font-bold text-[#7e22ce]">
+                    Drag {problem.b} here to complete a group!
+                  </span>
+                )}
+              </div>
+              {groupBinTotal > problem.b && (
+                <p className="mt-1 text-[10px] font-extrabold text-[#dc2626]">
+                  Over {problem.b}! Return a block and Break 10 → 10 Ones if needed.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#d8b4fe] bg-[#faf5ff] px-3 py-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-extrabold text-[#581c87]">
+                Equal Groups Built: {bankedGroups.length}
+              </span>
+              {bankedGroups.slice(0, 8).map((_, idx) => (
+                <span
+                  key={idx}
+                  className="rounded-md border border-[#a855f7] bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-[#6b21a8] tabular-nums"
+                >
+                  #{idx + 1} ({problem.b})
+                </span>
+              ))}
+              {bankedGroups.length > 8 && (
+                <span className="text-[11px] font-extrabold text-[#6b21a8]">
+                  +{bankedGroups.length - 8} more
+                </span>
+              )}
+            </div>
+            {bankedGroups.length > 0 && (
+              <button
+                type="button"
+                onClick={handleUndoBankedGroup}
+                className="rounded-lg border border-[#a855f7] bg-white px-2 py-0.5 text-[10px] font-extrabold text-[#6b21a8] hover:bg-[#f3e8ff]"
+              >
+                Undo Group
+              </button>
             )}
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Use Total Action */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+      {/* Check & Submit Action */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           data-testid="blocks-check-btn"
-          onClick={() => {
-            if (activeTotal === problem.answer) {
-              setCheckMsg(`Awesome! Your blocks make ${activeTotal}!`);
-            } else {
-              setCheckMsg(`Your blocks currently total ${activeTotal}. Keep adjusting!`);
-            }
-          }}
-          className="rounded-xl border-2 border-[#0369a1] bg-[#0ea5e9] px-3 py-1.5 font-display text-xs font-bold text-white shadow-[0_2px_0_#0369a1] hover:bg-[#0284c7]"
+          onClick={handleCheckBlocks}
+          className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#0369a1] bg-[#0ea5e9] px-3.5 py-2 font-display text-sm font-bold text-white shadow-[0_3px_0_#0369a1] hover:bg-[#0284c7] active:translate-y-0.5"
         >
-          Check Blocks ({activeTotal})
+          <Check className="h-4 w-4" />
+          Check Answer
         </button>
-        {onSubmitAnswer && activeTotal === problem.answer && (
+        {onSubmitAnswer && checkFeedback?.correct && (
           <button
             type="button"
             data-testid="blocks-submit-btn"
-            onClick={() => onSubmitAnswer(activeTotal)}
-            className="rounded-xl border-2 border-[#15803d] bg-[#22c55e] px-3 py-1.5 font-display text-xs font-bold text-white shadow-[0_2px_0_#15803d] hover:bg-[#16a34a]"
+            onClick={() => onSubmitAnswer(problem.answer)}
+            className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#15803d] bg-[#22c55e] px-3.5 py-2 font-display text-sm font-bold text-white shadow-[0_3px_0_#15803d] hover:bg-[#16a34a] active:translate-y-0.5"
           >
-            Submit {activeTotal} ★
+            Submit {problem.answer} ★
           </button>
         )}
-        {checkMsg && <span className="text-xs font-extrabold text-[#78350f]">{checkMsg}</span>}
+        {checkFeedback && (
+          <span
+            data-testid="blocks-feedback-msg"
+            className={`text-xs font-extrabold ${
+              checkFeedback.correct ? 'text-[#15803d]' : 'text-[#b45309]'
+            }`}
+          >
+            {checkFeedback.message}
+          </span>
+        )}
       </div>
+
+      {/* Floating Drag Ghost Preview */}
+      {dragState?.active && (
+        <div
+          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 scale-110 drop-shadow-lg"
+          style={{ left: dragState.x, top: dragState.y }}
+        >
+          {dragState.spawnGroupSize !== undefined ? (
+            <span className="rounded-xl border-2 border-[#d97706] bg-[#fef3c7] px-2.5 py-1 text-xs font-extrabold text-[#92400e] shadow-md">
+              + Group of {dragState.spawnGroupSize}
+            </span>
+          ) : (
+            <BlockVisual value={dragState.value} />
+          )}
+        </div>
+      )}
     </div>
   );
 };

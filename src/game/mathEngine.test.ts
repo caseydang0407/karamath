@@ -25,6 +25,14 @@ import {
 import { clearProgressCookies, createInitialProgress, generateSampleWeekProgress, loadProgress } from './storage';
 import { buildParentReportPdfBytes } from './exportPdf';
 import { buildMakeTenPlan } from './makeTen';
+import { buildNumberLinePlan, checkNumberLineAnswers } from './numberLine';
+import {
+  breakBlockInZone,
+  buildInitialBlocksForProblem,
+  moveBlockToZone,
+  sumZoneValue,
+  tradeBlocksInZone,
+} from './baseBlocks';
 import { computeLightingCycle } from '../three/lightingCycle';
 import { getWeatherMoodModifiers, pickRandomWeather } from '../three/weatherSystem';
 import type { DifficultyLevel, Operation } from './types';
@@ -636,6 +644,86 @@ test('buildParentReportPdfBytes produces a valid non-empty PDF document for pare
   assert.ok(bytes.length > 500, 'PDF output must be non-empty');
   const header = new TextDecoder().decode(bytes.slice(0, 5));
   assert.equal(header, '%PDF-');
+});
+
+test('buildNumberLinePlan and checkNumberLineAnswers support interactive tick filling across all 4 operations', () => {
+  const mk = (a: number, b: number, operation: Operation, answer: number) => ({
+    id: `nl-${a}-${operation}-${b}`,
+    a,
+    b,
+    operation,
+    symbol: (operation === 'add' ? '+' : operation === 'sub' ? '−' : operation === 'mul' ? '×' : '÷') as '+' | '−' | '×' | '÷',
+    answer,
+    choices: [answer, answer + 1, answer + 2, answer + 3],
+    hint: '',
+    tier: 2 as DifficultyLevel,
+  });
+
+  // Addition: 37 + 25 = 62 -> start 37, hops +10,+10,+5 -> ticks 47, 57, 62
+  const addPlan = buildNumberLinePlan(mk(25, 37, 'add', 62));
+  assert.equal(addPlan.startVal, 37);
+  assert.equal(addPlan.isBackward, false);
+  assert.equal(addPlan.hops[addPlan.hops.length - 1].targetValue, 62);
+  const addWrong = checkNumberLineAnswers(addPlan, addPlan.hops.map((h, i) => (i === 0 ? '99' : String(h.targetValue))));
+  assert.equal(addWrong.allCorrect, false);
+  assert.equal(addWrong.tickValid[0], false);
+  const addOk = checkNumberLineAnswers(addPlan, addPlan.hops.map((h) => String(h.targetValue)));
+  assert.equal(addOk.allCorrect, true);
+
+  // Subtraction: 52 - 14 = 38 -> start 52, backward hops to 38
+  const subPlan = buildNumberLinePlan(mk(52, 14, 'sub', 38));
+  assert.equal(subPlan.startVal, 52);
+  assert.equal(subPlan.isBackward, true);
+  assert.equal(subPlan.hops[subPlan.hops.length - 1].targetValue, 38);
+  assert.equal(checkNumberLineAnswers(subPlan, subPlan.hops.map((h) => String(h.targetValue))).allCorrect, true);
+
+  // Division: 24 / 6 = 4 -> skip counts 6, 12, 18, 24 and final jumps = 4
+  const divPlan = buildNumberLinePlan(mk(24, 6, 'div', 4));
+  assert.equal(divPlan.isDivisionCountMode, true);
+  assert.equal(divPlan.hops.map((h) => h.targetValue).join(','), '6,12,18,24');
+  assert.equal(checkNumberLineAnswers(divPlan, ['6', '12', '18', '24'], '3').allCorrect, false);
+  assert.equal(checkNumberLineAnswers(divPlan, ['6', '12', '18', '24'], '4').allCorrect, true);
+});
+
+test('movable baseBlocks helpers handle zone transfers, breaking tens, and trading ones cleanly', () => {
+  const addProblem = {
+    id: 'bb-add',
+    a: 25,
+    b: 17,
+    operation: 'add' as const,
+    symbol: '+' as const,
+    answer: 42,
+    choices: [42, 41, 43, 32],
+    hint: '',
+    tier: 2 as DifficultyLevel,
+  };
+
+  let state = buildInitialBlocksForProblem(addProblem);
+  assert.equal(sumZoneValue(state.blocks, 'set1'), 25);
+  assert.equal(sumZoneValue(state.blocks, 'set2'), 17);
+  assert.equal(sumZoneValue(state.blocks, 'mat'), 0);
+
+  // Move all set1 & set2 blocks onto the Answer Mat
+  let moved = state.blocks;
+  for (const b of state.blocks) {
+    moved = moveBlockToZone(moved, b.id, 'mat');
+  }
+  assert.equal(sumZoneValue(moved, 'set1'), 0);
+  assert.equal(sumZoneValue(moved, 'set2'), 0);
+  assert.equal(sumZoneValue(moved, 'mat'), 42);
+
+  // 5 + 7 = 12 ones -> trade 10 ones -> 1 ten on mat, total remains 42
+  const traded = tradeBlocksInZone(moved, 'mat', 1, state.nextId);
+  assert.equal(traded.traded, true);
+  assert.equal(sumZoneValue(traded.blocks, 'mat'), 42);
+
+  // Subtraction break ten -> 10 ones in set1
+  const subProblem = { ...addProblem, id: 'bb-sub', a: 32, b: 17, operation: 'sub' as const, symbol: '−' as const, answer: 15 };
+  const subInit = buildInitialBlocksForProblem(subProblem);
+  const broken = breakBlockInZone(subInit.blocks, 'set1', 10, subInit.nextId);
+  assert.equal(broken.broke, true);
+  assert.equal(sumZoneValue(broken.blocks, 'set1'), 32);
+  assert.equal(broken.blocks.filter((b) => b.value === 1).length, 12);
 });
 
 
